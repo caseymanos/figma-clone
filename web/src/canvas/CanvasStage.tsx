@@ -30,7 +30,6 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   const upsertObject = useCanvasState((s) => s.upsertObject)
   const removeObject = useCanvasState((s) => s.removeObject)
   const cursors = useCanvasState((s) => s.cursors)
-  const setCursor = useCanvasState((s) => s.setCursor)
   const setCursors = useCanvasState((s) => s.setCursors)
   const lastPresenceRef = useRef<Record<string, { x: number; y: number; name: string; color: string }>>({})
 
