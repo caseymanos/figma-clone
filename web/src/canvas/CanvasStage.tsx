@@ -142,6 +142,16 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     })
   }
 
+  const onStageDragMove = (e: any) => {
+    const node = e.target
+    setOffset({ x: node.x(), y: node.y() })
+  }
+
+  const onStageDragEnd = (e: any) => {
+    const node = e.target
+    setOffset({ x: node.x(), y: node.y() })
+  }
+
   const sendDragUpdate = throttle(async (id: string, x: number, y: number) => {
     await supabase.from('objects').update({ x, y }).eq('id', id)
   }, 80)
@@ -177,6 +187,8 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         x={offset.x}
         y={offset.y}
         onWheel={onWheel}
+        onDragMove={onStageDragMove}
+        onDragEnd={onStageDragEnd}
       >
         <Layer>
           {objects.map((o) => (
