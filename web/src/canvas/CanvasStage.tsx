@@ -184,20 +184,24 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   const sendDragUpdateRef = useRef(
     throttle(async (id: string, x: number, y: number) => {
       await supabase.from('objects').update({ x, y }).eq('id', id)
-    }, 80)
+    }, 100)
   )
 
   const onDragMove = useCallback((id: string) => (e: any) => {
     const node = e.target
-    const obj = { id, x: node.x(), y: node.y(), width: node.width(), height: node.height() }
-    upsertObject(obj)
+    // Only send to DB (throttled), don't update local state during drag
+    // Konva handles the visual update; we'll sync to store on dragend
     sendDragUpdateRef.current(id, node.x(), node.y())
-  }, [upsertObject])
+  }, [])
 
   const onDragEnd = useCallback((id: string) => async (e: any) => {
     const node = e.target
-    await supabase.from('objects').update({ x: node.x(), y: node.y() }).eq('id', id)
-  }, [])
+    const finalPos = { x: node.x(), y: node.y() }
+    // Update local state with final position
+    upsertObject({ id, ...finalPos, width: node.width(), height: node.height() })
+    // Send final position to DB (will be echoed back via postgres_changes)
+    await supabase.from('objects').update(finalPos).eq('id', id)
+  }, [upsertObject])
 
   const addRect = async () => {
     const { data, error } = await supabase
