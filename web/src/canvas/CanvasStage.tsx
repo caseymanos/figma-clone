@@ -200,9 +200,16 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   }, [])
 
   const addRect = async () => {
-    await supabase
+    const { data, error } = await supabase
       .from('objects')
       .insert({ canvas_id: canvasId, type: 'rect', x: 100, y: 100, width: 120, height: 80, fill: '#4f46e5' })
+    
+    if (error) {
+      console.error('Failed to add rectangle:', error)
+      alert(`Failed to add rectangle: ${error.message}`)
+    } else {
+      console.log('Rectangle added:', data)
+    }
   }
 
   return (
