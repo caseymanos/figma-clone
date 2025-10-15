@@ -9,6 +9,7 @@ interface CanvasState {
   upsertObject: (o: ObjectRecord) => void
   removeObject: (id: string) => void
   setCursor: (id: string, c: Cursor) => void
+  setCursors: (cs: Record<string, Cursor>) => void
 }
 
 export const useCanvasState = create<CanvasState>((set) => ({
@@ -25,4 +26,5 @@ export const useCanvasState = create<CanvasState>((set) => ({
   }),
   removeObject: (id) => set((s) => { const { [id]: _, ...rest } = s.objects; return { objects: rest } }),
   setCursor: (id, c) => set((s) => ({ cursors: { ...s.cursors, [id]: c } })),
+  setCursors: (cs) => set(() => ({ cursors: cs })),
 }))

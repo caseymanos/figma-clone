@@ -31,6 +31,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   const removeObject = useCanvasState((s) => s.removeObject)
   const cursors = useCanvasState((s) => s.cursors)
   const setCursor = useCanvasState((s) => s.setCursor)
+  const setCursors = useCanvasState((s) => s.setCursors)
 
   useEffect(() => {
     const channel = supabase
@@ -99,12 +100,12 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     const channel = supabase.channel(`presence:canvas:${canvasId}`, { config: { presence: { key: uid } } })
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState() as Record<string, Array<any>>
-      const merged: Record<string, any> = {}
+      const next: Record<string, { x: number; y: number; name: string; color: string }> = {}
       Object.entries(state).forEach(([key, arr]) => {
         const latest = arr[arr.length - 1]
-        if (latest) merged[key] = latest
+        if (latest) next[key] = { x: latest.x, y: latest.y, name: latest.name, color: latest.color }
       })
-      Object.entries(merged).forEach(([id, c]) => setCursor(id, { x: c.x, y: c.y, name: c.name, color: c.color }))
+      setCursors(next)
     })
     channel.subscribe(async (status: any) => {
       if (status === 'SUBSCRIBED') {
@@ -123,7 +124,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       node?.off('mousemove', handleMove)
       supabase.removeChannel(channel)
     }
-  }, [canvasId, setCursor])
+  }, [canvasId, setCursor, setCursors])
 
   const onWheel = (e: any) => {
     e.evt.preventDefault()
