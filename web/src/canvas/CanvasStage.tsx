@@ -33,6 +33,18 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   const setCursor = useCanvasState((s) => s.setCursor)
   const setCursors = useCanvasState((s) => s.setCursors)
 
+  const isSameCursors = (a: Record<string, any>, b: Record<string, any>) => {
+    const aKeys = Object.keys(a)
+    const bKeys = Object.keys(b)
+    if (aKeys.length !== bKeys.length) return false
+    for (const k of aKeys) {
+      const av = a[k]
+      const bv = b[k]
+      if (!bv || av.x !== bv.x || av.y !== bv.y || av.name !== bv.name || av.color !== bv.color) return false
+    }
+    return true
+  }
+
   useEffect(() => {
     const channel = supabase
       .channel(`objects:${canvasId}`)
@@ -105,7 +117,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         const latest = arr[arr.length - 1]
         if (latest) next[key] = { x: latest.x, y: latest.y, name: latest.name, color: latest.color }
       })
-      setCursors(next)
+      if (!isSameCursors(next, cursors)) setCursors(next)
     })
     channel.subscribe(async (status: any) => {
       if (status === 'SUBSCRIBED') {
@@ -124,9 +136,9 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       node?.off('mousemove', handleMove)
       supabase.removeChannel(channel)
     }
-  }, [canvasId, setCursor, setCursors])
+  }, [canvasId, setCursor, setCursors, cursors])
 
-  const onWheel = (e: any) => {
+  const onWheel = throttle((e: any) => {
     e.evt.preventDefault()
     const scaleBy = 1.05
     const stage = stageRef.current
@@ -141,7 +153,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       x: -(mousePointTo.x - stage.getPointerPosition().x / newScale) * newScale,
       y: -(mousePointTo.y - stage.getPointerPosition().y / newScale) * newScale,
     })
-  }
+  }, 16)
 
   const onStageDragMove = (e: any) => {
     const node = e.target
