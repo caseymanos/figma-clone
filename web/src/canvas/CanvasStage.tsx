@@ -25,11 +25,6 @@ function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
 export function CanvasStage({ canvasId }: { canvasId: string }) {
   const stageRef = useRef<any>(null)
   const [scale, setScale] = useState(1)
-  const [offset, setOffset] = useState({ x: 0, y: 0 })
-  const setOffsetIfChanged = (x: number, y: number) => {
-    setOffset((prev) => (prev.x === x && prev.y === y ? prev : { x, y }))
-  }
-
   const setScaleIfChanged = (next: number) => {
     setScale((prev) => (prev === next ? prev : next))
   }
@@ -172,15 +167,13 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     }
     const newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy
     setScaleIfChanged(newScale)
-    const nextX = -(mousePointTo.x - stage.getPointerPosition().x / newScale) * newScale
-    const nextY = -(mousePointTo.y - stage.getPointerPosition().y / newScale) * newScale
-    setOffsetIfChanged(nextX, nextY)
+    const pointer = stage.getPointerPosition()
+    const newPos = { x: pointer.x - mousePointTo.x * newScale, y: pointer.y - mousePointTo.y * newScale }
+    stage.position(newPos)
   }, 16)
 
-  const onStageDragEnd = (e: any) => {
-    const node = e.target
-    setOffsetIfChanged(node.x(), node.y())
-  }
+  // no-op: stage position is uncontrolled; we don't mirror into React state
+  const onStageDragEnd = () => {}
 
   const sendDragUpdate = throttle(async (id: string, x: number, y: number) => {
     await supabase.from('objects').update({ x, y }).eq('id', id)
@@ -214,8 +207,6 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         draggable
         scaleX={scale}
         scaleY={scale}
-        x={offset.x}
-        y={offset.y}
         onWheel={onWheel}
         onDragEnd={onStageDragEnd}
       >
