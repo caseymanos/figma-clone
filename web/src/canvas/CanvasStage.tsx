@@ -28,16 +28,22 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   const setScaleIfChanged = (next: number) => {
     setScale((prev) => (prev === next ? prev : next))
   }
-  const objects = useCanvasState((s) => Object.values(s.objects))
+  const objectsRecord = useCanvasState((s) => s.objects)
+  const objects = Object.values(objectsRecord)
   const upsertObject = useCanvasState((s) => s.upsertObject)
   const removeObject = useCanvasState((s) => s.removeObject)
   const cursors = useCanvasState((s) => s.cursors)
-  const setCursors = useCanvasState((s) => s.setCursors)
+  const setCursorsRef = useRef(useCanvasState.getState().setCursors)
   const lastPresenceRef = useRef<Record<string, { x: number; y: number; name: string; color: string }>>({})
   const pendingPresenceRef = useRef<Record<string, { x: number; y: number; name: string; color: string }> | null>(null)
   const presenceRafRef = useRef<number | null>(null)
 
-  const isSameCursors = (a: Record<string, any>, b: Record<string, any>) => {
+  // Update ref on every render to ensure it's current
+  useEffect(() => {
+    setCursorsRef.current = useCanvasState.getState().setCursors
+  })
+
+  const isSameCursors = useCallback((a: Record<string, any>, b: Record<string, any>) => {
     const aKeys = Object.keys(a)
     const bKeys = Object.keys(b)
     if (aKeys.length !== bKeys.length) return false
@@ -47,7 +53,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       if (!bv || av.x !== bv.x || av.y !== bv.y || av.name !== bv.name || av.color !== bv.color) return false
     }
     return true
-  }
+  }, [])
 
   useEffect(() => {
     const channel = supabase
@@ -131,7 +137,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
           pendingPresenceRef.current = null
           if (snapshot && !isSameCursors(snapshot, lastPresenceRef.current)) {
             lastPresenceRef.current = snapshot
-            setCursors(snapshot)
+            setCursorsRef.current(snapshot)
           }
         })
       }
