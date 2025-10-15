@@ -159,6 +159,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       node?.off('mousemove', handleMove)
       supabase.removeChannel(channel)
       if (presenceRafRef.current != null) cancelAnimationFrame(presenceRafRef.current)
+      if (dragRafRef.current != null) cancelAnimationFrame(dragRafRef.current)
     }
   }, [canvasId])
 
@@ -181,17 +182,26 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   // no-op: stage position is uncontrolled; we don't mirror into React state
   const onStageDragEnd = () => {}
 
-  const sendDragUpdateRef = useRef(
-    throttle(async (id: string, x: number, y: number) => {
-      await supabase.from('objects').update({ x, y }).eq('id', id)
-    }, 100)
-  )
+  const dragUpdateRef = useRef<{ id: string; x: number; y: number } | null>(null)
+  const dragRafRef = useRef<number | null>(null)
 
   const onDragMove = useCallback((id: string) => (e: any) => {
     const node = e.target
-    // Only send to DB (throttled), don't update local state during drag
-    // Konva handles the visual update; we'll sync to store on dragend
-    sendDragUpdateRef.current(id, node.x(), node.y())
+    // Store pending update
+    dragUpdateRef.current = { id, x: node.x(), y: node.y() }
+    
+    // Batch updates with rAF (once per frame max)
+    if (dragRafRef.current === null) {
+      dragRafRef.current = requestAnimationFrame(() => {
+        const pending = dragUpdateRef.current
+        dragRafRef.current = null
+        
+        if (pending) {
+          // Send to DB (other users will see via postgres_changes)
+          supabase.from('objects').update({ x: pending.x, y: pending.y }).eq('id', pending.id)
+        }
+      })
+    }
   }, [])
 
   const onDragEnd = useCallback((id: string) => async (e: any) => {

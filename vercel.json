@@ -8,7 +8,8 @@
     "VITE_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhbmJ3dXlveXFlbmRrbXVuYXRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE5NjkwOTEsImV4cCI6MjA1NzU0NTA5MX0.fo92M898_yucVDo2oqWocpLcCfDvaNxBSibpqpu6Nhc"
   },
   "rewrites": [
-    { "source": "/c/(.*)", "destination": "/" }
+    { "source": "/c/:canvasId", "destination": "/" },
+    { "source": "/(.*)", "destination": "/" }
   ]
 }
 
