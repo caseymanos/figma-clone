@@ -1,5 +1,4 @@
 import { useRouteError, isRouteErrorResponse, Link } from 'react-router-dom'
-import { Fragment } from 'react'
 
 export default function RouteError() {
   const error = useRouteError()
