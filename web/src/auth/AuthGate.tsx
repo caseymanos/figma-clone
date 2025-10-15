@@ -2,8 +2,6 @@ import type { PropsWithChildren } from 'react'
 import { useEffect, useState } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabaseClient'
-import { Auth } from '@supabase/auth-ui-react'
-import { ThemeSupa } from '@supabase/auth-ui-shared'
 
 export function AuthGate({ children }: PropsWithChildren) {
   const [session, setSession] = useState<Session | null>(null)
@@ -34,7 +32,25 @@ export function AuthGate({ children }: PropsWithChildren) {
     return (
       <div style={{ maxWidth: 420, margin: '72px auto' }}>
         <h2>Sign in to CollabCanvas</h2>
-        <Auth supabaseClient={supabase} appearance={{ theme: ThemeSupa }} providers={['github']} redirectTo={window.location.origin} />
+        <p style={{ margin: '12px 0', opacity: 0.8 }}>Use your GitHub account to continue.</p>
+        <button
+          onClick={async () => {
+            await supabase.auth.signInWithOAuth({
+              provider: 'github',
+              options: { redirectTo: window.location.origin },
+            })
+          }}
+          style={{
+            padding: '10px 14px',
+            borderRadius: 6,
+            border: '1px solid #e5e7eb',
+            background: '#111827',
+            color: 'white',
+            cursor: 'pointer',
+          }}
+        >
+          Continue with GitHub
+        </button>
       </div>
     )
   }
