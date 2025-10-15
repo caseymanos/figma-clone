@@ -1,5 +1,5 @@
 import { Stage, Layer, Rect, Group, Circle, Text } from 'react-konva'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useCanvasState } from './state'
 
@@ -175,19 +175,23 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   // no-op: stage position is uncontrolled; we don't mirror into React state
   const onStageDragEnd = () => {}
 
-  const sendDragUpdate = throttle(async (id: string, x: number, y: number) => {
-    await supabase.from('objects').update({ x, y }).eq('id', id)
-  }, 80)
+  const sendDragUpdateRef = useRef(
+    throttle(async (id: string, x: number, y: number) => {
+      await supabase.from('objects').update({ x, y }).eq('id', id)
+    }, 80)
+  )
 
-  const onDragMove = (id: string) => (e: any) => {
+  const onDragMove = useCallback((id: string) => (e: any) => {
     const node = e.target
-    upsertObject({ id, x: node.x(), y: node.y(), width: node.width(), height: node.height(), fill: node.fill() })
-    sendDragUpdate(id, node.x(), node.y())
-  }
-  const onDragEnd = (id: string) => async (e: any) => {
+    const obj = { id, x: node.x(), y: node.y(), width: node.width(), height: node.height() }
+    upsertObject(obj)
+    sendDragUpdateRef.current(id, node.x(), node.y())
+  }, [upsertObject])
+
+  const onDragEnd = useCallback((id: string) => async (e: any) => {
     const node = e.target
     await supabase.from('objects').update({ x: node.x(), y: node.y() }).eq('id', id)
-  }
+  }, [])
 
   const addRect = async () => {
     await supabase
