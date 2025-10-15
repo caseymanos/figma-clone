@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "daipendency": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@daipendency/mcp"
+      ]
+    }
+  }
+}
