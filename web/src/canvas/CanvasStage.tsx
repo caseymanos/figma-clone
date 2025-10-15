@@ -32,6 +32,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   const cursors = useCanvasState((s) => s.cursors)
   const setCursor = useCanvasState((s) => s.setCursor)
   const setCursors = useCanvasState((s) => s.setCursors)
+  const lastPresenceRef = useRef<Record<string, { x: number; y: number; name: string; color: string }>>({})
 
   const isSameCursors = (a: Record<string, any>, b: Record<string, any>) => {
     const aKeys = Object.keys(a)
@@ -91,7 +92,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [canvasId, removeObject, upsertObject])
+  }, [canvasId])
 
   useEffect(() => {
     const uid = (window as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2)
@@ -117,7 +118,11 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         const latest = arr[arr.length - 1]
         if (latest) next[key] = { x: latest.x, y: latest.y, name: latest.name, color: latest.color }
       })
-      if (!isSameCursors(next, cursors)) setCursors(next)
+      const prev = lastPresenceRef.current
+      if (!isSameCursors(next, prev)) {
+        lastPresenceRef.current = next
+        setCursors(next)
+      }
     })
     channel.subscribe(async (status: any) => {
       if (status === 'SUBSCRIBED') {
@@ -136,7 +141,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       node?.off('mousemove', handleMove)
       supabase.removeChannel(channel)
     }
-  }, [canvasId, setCursor, setCursors, cursors])
+  }, [canvasId])
 
   const onWheel = throttle((e: any) => {
     e.evt.preventDefault()
