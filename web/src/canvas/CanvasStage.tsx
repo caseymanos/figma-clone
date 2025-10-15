@@ -26,12 +26,21 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   const stageRef = useRef<any>(null)
   const [scale, setScale] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const setOffsetIfChanged = (x: number, y: number) => {
+    setOffset((prev) => (prev.x === x && prev.y === y ? prev : { x, y }))
+  }
+
+  const setScaleIfChanged = (next: number) => {
+    setScale((prev) => (prev === next ? prev : next))
+  }
   const objects = useCanvasState((s) => Object.values(s.objects))
   const upsertObject = useCanvasState((s) => s.upsertObject)
   const removeObject = useCanvasState((s) => s.removeObject)
   const cursors = useCanvasState((s) => s.cursors)
   const setCursors = useCanvasState((s) => s.setCursors)
   const lastPresenceRef = useRef<Record<string, { x: number; y: number; name: string; color: string }>>({})
+  const pendingPresenceRef = useRef<Record<string, { x: number; y: number; name: string; color: string }> | null>(null)
+  const presenceRafRef = useRef<number | null>(null)
 
   const isSameCursors = (a: Record<string, any>, b: Record<string, any>) => {
     const aKeys = Object.keys(a)
@@ -118,9 +127,18 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         if (latest) next[key] = { x: latest.x, y: latest.y, name: latest.name, color: latest.color }
       })
       const prev = lastPresenceRef.current
-      if (!isSameCursors(next, prev)) {
-        lastPresenceRef.current = next
-        setCursors(next)
+      if (isSameCursors(next, prev)) return
+      pendingPresenceRef.current = next
+      if (presenceRafRef.current == null) {
+        presenceRafRef.current = requestAnimationFrame(() => {
+          const snapshot = pendingPresenceRef.current
+          presenceRafRef.current = null
+          pendingPresenceRef.current = null
+          if (snapshot && !isSameCursors(snapshot, lastPresenceRef.current)) {
+            lastPresenceRef.current = snapshot
+            setCursors(snapshot)
+          }
+        })
       }
     })
     channel.subscribe(async (status: any) => {
@@ -139,6 +157,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     return () => {
       node?.off('mousemove', handleMove)
       supabase.removeChannel(channel)
+      if (presenceRafRef.current != null) cancelAnimationFrame(presenceRafRef.current)
     }
   }, [canvasId])
 
@@ -152,21 +171,20 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       y: (stage.getPointerPosition().y - stage.y()) / oldScale,
     }
     const newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy
-    setScale(newScale)
-    setOffset({
-      x: -(mousePointTo.x - stage.getPointerPosition().x / newScale) * newScale,
-      y: -(mousePointTo.y - stage.getPointerPosition().y / newScale) * newScale,
-    })
+    setScaleIfChanged(newScale)
+    const nextX = -(mousePointTo.x - stage.getPointerPosition().x / newScale) * newScale
+    const nextY = -(mousePointTo.y - stage.getPointerPosition().y / newScale) * newScale
+    setOffsetIfChanged(nextX, nextY)
   }, 16)
 
   const onStageDragMove = (e: any) => {
     const node = e.target
-    setOffset({ x: node.x(), y: node.y() })
+    setOffsetIfChanged(node.x(), node.y())
   }
 
   const onStageDragEnd = (e: any) => {
     const node = e.target
-    setOffset({ x: node.x(), y: node.y() })
+    setOffsetIfChanged(node.x(), node.y())
   }
 
   const sendDragUpdate = throttle(async (id: string, x: number, y: number) => {
