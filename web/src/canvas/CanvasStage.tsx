@@ -177,11 +177,6 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     setOffsetIfChanged(nextX, nextY)
   }, 16)
 
-  const onStageDragMove = (e: any) => {
-    const node = e.target
-    setOffsetIfChanged(node.x(), node.y())
-  }
-
   const onStageDragEnd = (e: any) => {
     const node = e.target
     setOffsetIfChanged(node.x(), node.y())
@@ -222,7 +217,6 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         x={offset.x}
         y={offset.y}
         onWheel={onWheel}
-        onDragMove={onStageDragMove}
         onDragEnd={onStageDragEnd}
       >
         <Layer>
