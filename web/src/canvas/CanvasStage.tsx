@@ -146,7 +146,15 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         const latest = arr[arr.length - 1]
         if (latest) {
           next[key] = { x: latest.x, y: latest.y, name: latest.name || 'User', color: latest.color }
-          if (latest.t) { lagSum += now - latest.t; lagCount += 1 }
+          // Ignore our own session and stale timestamps (>2s)
+          const isSelf = key === uid
+          if (!isSelf && typeof latest.t === 'number') {
+            const age = now - latest.t
+            if (age >= 0 && age < 2000) {
+              lagSum += age
+              lagCount += 1
+            }
+          }
         }
       })
       const prev = lastPresenceRef.current
