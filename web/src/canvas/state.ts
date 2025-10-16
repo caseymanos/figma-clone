@@ -17,6 +17,7 @@ interface CanvasState {
   cursors: Record<string, Cursor>
   objects: Record<string, ObjectRecord>
   upsertObject: (o: ObjectRecord) => void
+  upsertMany: (os: ObjectRecord[]) => void
   removeObject: (id: string) => void
   setCursor: (id: string, c: Cursor) => void
   setCursors: (cs: Record<string, Cursor>) => void
@@ -38,6 +39,32 @@ export const useCanvasState = create<CanvasState>((set) => ({
       return s
     }
     return { objects: { ...s.objects, [o.id]: { ...prev, ...o } } }
+  }),
+  upsertMany: (incoming) => set((s) => {
+    if (!incoming || incoming.length === 0) return s
+    const nextObjects = { ...s.objects }
+    for (const o of incoming) {
+      const prev = nextObjects[o.id]
+      if (prev && prev.updatedAt && o.updatedAt) {
+        const inc = Date.parse(o.updatedAt)
+        const cur = Date.parse(prev.updatedAt)
+        if (inc < cur) continue
+      }
+      if (
+        prev &&
+        prev.x === o.x &&
+        prev.y === o.y &&
+        prev.width === o.width &&
+        prev.height === o.height &&
+        prev.fill === o.fill &&
+        prev.text_content === o.text_content &&
+        prev.type === o.type
+      ) {
+        continue
+      }
+      nextObjects[o.id] = { ...prev, ...o }
+    }
+    return { objects: nextObjects }
   }),
   removeObject: (id) => set((s) => { const { [id]: _, ...rest } = s.objects; return { objects: rest } }),
   setCursor: (id, c) => set((s) => ({ cursors: { ...s.cursors, [id]: c } })),

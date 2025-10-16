@@ -31,6 +31,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   const objectsRecord = useCanvasState((s) => s.objects)
   const objects = Object.values(objectsRecord)
   const upsertObject = useCanvasState((s) => s.upsertObject)
+  const upsertMany = useCanvasState((s) => (s as any).upsertMany)
   const removeObject = useCanvasState((s) => s.removeObject)
   const cursors = useCanvasState((s) => s.cursors)
   const setCursorsRef = useRef(useCanvasState.getState().setCursors)
@@ -55,6 +56,9 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     return true
   }, [])
 
+  const pendingObjectsRef = useRef<Array<any>>([])
+  const objectsRafRef = useRef<number | null>(null)
+
   useEffect(() => {
     const channel = supabase
       .channel(`objects:${canvasId}`)
@@ -64,7 +68,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         (payload: any) => {
           if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
             const r = payload.new
-            upsertObject({
+            pendingObjectsRef.current.push({
               id: r.id,
               type: r.type,
               x: r.x,
@@ -75,6 +79,14 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
               text_content: r.text_content,
               updatedAt: r.updated_at,
             })
+            if (objectsRafRef.current == null) {
+              objectsRafRef.current = requestAnimationFrame(() => {
+                const batch = pendingObjectsRef.current
+                pendingObjectsRef.current = []
+                objectsRafRef.current = null
+                if (batch.length) upsertMany(batch)
+              })
+            }
           } else if (payload.eventType === 'DELETE') {
             removeObject(payload.old.id)
           }
@@ -104,24 +116,29 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
 
     return () => {
       supabase.removeChannel(channel)
+      if (objectsRafRef.current != null) cancelAnimationFrame(objectsRafRef.current)
     }
-  }, [canvasId])
+  }, [canvasId, upsertMany, removeObject])
 
   useEffect(() => {
     const uid = (window as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2)
     
-    // Generate a unique color based on UID
+    // Generate a unique color per session (not per user)
     const colors = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
-    const colorIndex = parseInt(uid.slice(0, 8), 36) % colors.length
+    const colorIndex = parseInt(uid.slice(-8), 36) % colors.length
     const color = colors[colorIndex]
     
     const channel = supabase.channel(`presence:canvas:${canvasId}`, { config: { presence: { key: uid } } })
+    
+    // Start with default name, update async
+    let currentName = 'User'
+    
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState() as Record<string, Array<any>>
       const next: Record<string, { x: number; y: number; name: string; color: string }> = {}
       Object.entries(state).forEach(([key, arr]) => {
         const latest = arr[arr.length - 1]
-        if (latest) next[key] = { x: latest.x, y: latest.y, name: latest.name, color: latest.color }
+        if (latest) next[key] = { x: latest.x, y: latest.y, name: latest.name || 'User', color: latest.color }
       })
       const prev = lastPresenceRef.current
       if (isSameCursors(next, prev)) return
@@ -138,10 +155,13 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         })
       }
     })
+    
     channel.subscribe(async (status: any) => {
       if (status === 'SUBSCRIBED') {
-        // Fetch user name before tracking
-        let name = 'User'
+        // Track immediately with default name
+        await channel.track({ x: 0, y: 0, name: currentName, color })
+        
+        // Then fetch real name and update
         const { data } = await supabase.auth.getUser()
         const user = data.user
         if (user) {
@@ -150,9 +170,12 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
             .select('display_name')
             .eq('id', user.id)
             .maybeSingle()
-          name = (profile?.display_name as string) || user.email || 'User'
+          const fetchedName = (profile?.display_name as string) || user.email?.split('@')[0] || 'User'
+          if (fetchedName !== currentName) {
+            currentName = fetchedName
+            await channel.track({ name: currentName })
+          }
         }
-        await channel.track({ x: 0, y: 0, name, color })
       }
     })
 
@@ -195,17 +218,12 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
 
   const onDragMove = useCallback((id: string) => (e: any) => {
     const node = e.target
-    // Store pending update
     dragUpdateRef.current = { id, x: node.x(), y: node.y() }
-    
-    // Batch updates with rAF (once per frame max)
     if (dragRafRef.current === null) {
       dragRafRef.current = requestAnimationFrame(() => {
         const pending = dragUpdateRef.current
         dragRafRef.current = null
-        
         if (pending) {
-          // Send to DB (other users will see via postgres_changes)
           supabase.from('objects').update({ x: pending.x, y: pending.y }).eq('id', pending.id)
         }
       })
@@ -331,26 +349,27 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
           })}
           {Object.entries(cursors).map(([id, c]) => {
             const displayName = c.name || 'User'
+            const labelWidth = displayName.length * 7.5 + 16
             return (
               <Group key={id}>
                 {/* Cursor pointer */}
                 <Circle x={c.x} y={c.y} radius={6} fill={c.color} stroke="white" strokeWidth={2} />
                 {/* Name label background */}
                 <Rect 
-                  x={c.x + 12} 
-                  y={c.y - 10} 
-                  width={displayName.length * 8 + 12}
-                  height={24}
+                  x={c.x + 10} 
+                  y={c.y + 10} 
+                  width={labelWidth}
+                  height={22}
                   fill={c.color}
                   cornerRadius={4}
-                  opacity={0.9}
+                  opacity={0.95}
                 />
                 {/* Name label text */}
                 <Text 
                   x={c.x + 18} 
-                  y={c.y - 5} 
+                  y={c.y + 15} 
                   text={displayName} 
-                  fontSize={14}
+                  fontSize={13}
                   fontStyle="bold"
                   fill="white"
                 />
