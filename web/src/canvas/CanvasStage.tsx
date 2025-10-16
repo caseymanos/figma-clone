@@ -169,7 +169,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
             lastPresenceRef.current = snapshot
             setCursorsRef.current(snapshot)
           }
-          if (lagCount) setAvgLagMs(Math.round(lagSum / lagCount))
+          setAvgLagMs(lagCount ? Math.round(lagSum / lagCount) : 0)
         })
       }
     })
@@ -400,45 +400,17 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
               )
             }
           })}
-          {Object.entries(cursors).map(([id, c]) => {
-            const displayName = c.name || 'User'
-            const labelWidth = displayName.length * 7.5 + 16
-            return (
-              <Group key={id}>
-                {/* Cursor pointer */}
-                <Circle x={c.x} y={c.y} radius={6} fill={c.color} stroke="white" strokeWidth={2} />
-                {/* Name label background */}
-                <Rect 
-                  x={c.x + 10} 
-                  y={c.y + 10} 
-                  width={labelWidth}
-                  height={22}
-                  fill={c.color}
-                  cornerRadius={4}
-                  opacity={0.95}
-                />
-                {/* Name label text */}
-                <Text 
-                  x={c.x + 18} 
-                  y={c.y + 15} 
-                  text={displayName} 
-                  fontSize={13}
-                  fontStyle="bold"
-                  fill="white"
-                />
-              </Group>
-            )
-          })}
+          {Object.entries(cursors).map(() => null)}
         </Layer>
         <FastLayer listening={false}>
           {Object.entries(cursors).map(([id, c]) => {
             const displayName = c.name || 'User'
             const labelWidth = displayName.length * 7.5 + 16
             return (
-              <Group key={id}>
+              <Group key={id} listening={false}>
                 <Circle x={c.x} y={c.y} radius={6} fill={c.color} stroke="white" strokeWidth={2} />
-                <Rect x={c.x + 10} y={c.y + 10} width={labelWidth} height={22} fill={c.color} cornerRadius={4} opacity={0.95} />
-                <Text x={c.x + 18} y={c.y + 15} text={displayName} fontSize={13} fontStyle="bold" fill="white" />
+                <Rect x={c.x + 10} y={c.y - 26} width={labelWidth} height={20} fill={c.color} cornerRadius={4} opacity={0.95} />
+                <Text x={c.x + 16} y={c.y - 22} text={displayName} fontSize={12} fontStyle="bold" fill="white" />
               </Group>
             )
           })}
