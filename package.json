@@ -1,0 +1,11 @@
+{
+  "name": "figma-clone",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install": "cd web && npm install",
+    "build": "cd web && npm run build",
+    "dev": "cd web && npm run dev"
+  }
+}
+
