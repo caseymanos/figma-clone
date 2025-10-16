@@ -1,4 +1,4 @@
-import { Stage, Layer, Rect, Group, Circle, Text } from 'react-konva'
+import { Stage, Layer, Rect, Group, Circle, Text, FastLayer } from 'react-konva'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useCanvasState } from './state'
@@ -40,6 +40,9 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   const presenceRafRef = useRef<number | null>(null)
 
   // Update ref on every render to ensure it's current
+  const [fps, setFps] = useState(0)
+  const [avgLagMs, setAvgLagMs] = useState(0)
+
   useEffect(() => {
     setCursorsRef.current = useCanvasState.getState().setCursors
   })
@@ -99,19 +102,19 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       .select('*')
       .eq('canvas_id', canvasId)
       .then(({ data }) => {
-        data?.forEach((r: any) =>
-          upsertObject({
-            id: r.id,
-            type: r.type,
-            x: r.x,
-            y: r.y,
-            width: r.width,
-            height: r.height,
-            fill: r.fill || '#4f46e5',
-            text_content: r.text_content,
-            updatedAt: r.updated_at,
-          })
-        )
+        if (!data || !data.length) return
+        const batch = data.map((r: any) => ({
+          id: r.id,
+          type: r.type,
+          x: r.x,
+          y: r.y,
+          width: r.width,
+          height: r.height,
+          fill: r.fill || '#4f46e5',
+          text_content: r.text_content,
+          updatedAt: r.updated_at,
+        }))
+        upsertMany(batch)
       })
 
     return () => {
@@ -136,9 +139,15 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState() as Record<string, Array<any>>
       const next: Record<string, { x: number; y: number; name: string; color: string }> = {}
+      const now = Date.now()
+      let lagSum = 0
+      let lagCount = 0
       Object.entries(state).forEach(([key, arr]) => {
         const latest = arr[arr.length - 1]
-        if (latest) next[key] = { x: latest.x, y: latest.y, name: latest.name || 'User', color: latest.color }
+        if (latest) {
+          next[key] = { x: latest.x, y: latest.y, name: latest.name || 'User', color: latest.color }
+          if (latest.t) { lagSum += now - latest.t; lagCount += 1 }
+        }
       })
       const prev = lastPresenceRef.current
       if (isSameCursors(next, prev)) return
@@ -152,6 +161,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
             lastPresenceRef.current = snapshot
             setCursorsRef.current(snapshot)
           }
+          if (lagCount) setAvgLagMs(Math.round(lagSum / lagCount))
         })
       }
     })
@@ -159,7 +169,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     channel.subscribe(async (status: any) => {
       if (status === 'SUBSCRIBED') {
         // Track immediately with default name
-        await channel.track({ x: 0, y: 0, name: currentName, color })
+        await channel.track({ x: 0, y: 0, name: currentName, color, t: Date.now() })
         
         // Then fetch real name and update
         const { data } = await supabase.auth.getUser()
@@ -173,16 +183,30 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
           const fetchedName = (profile?.display_name as string) || user.email?.split('@')[0] || 'User'
           if (fetchedName !== currentName) {
             currentName = fetchedName
-            await channel.track({ name: currentName })
+            await channel.track({ name: currentName, t: Date.now() })
           }
         }
       }
     })
 
-    const handleMove = throttle(() => {
+    // Cursor update with threshold + visibility awareness
+    let lastPos = { x: 0, y: 0 }
+    const minDelta = 2
+    const tickMs = 50
+    let lastTick = 0
+    const handleMove = () => {
+      const now = performance.now()
+      if (now - lastTick < tickMs) return
+      lastTick = now
+      if (document.hidden) return
       const pos = stageRef.current?.getPointerPosition()
-      if (pos) channel.track({ x: pos.x, y: pos.y })
-    }, 40)
+      if (!pos) return
+      const dx = Math.abs(pos.x - lastPos.x)
+      const dy = Math.abs(pos.y - lastPos.y)
+      if (dx < minDelta && dy < minDelta) return
+      lastPos = { x: pos.x, y: pos.y }
+      channel.track({ x: pos.x, y: pos.y, t: Date.now() })
+    }
 
     const node = stageRef.current?.getStage()
     node?.on('mousemove', handleMove)
@@ -193,6 +217,27 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       if (dragRafRef.current != null) cancelAnimationFrame(dragRafRef.current)
     }
   }, [canvasId])
+
+  // FPS HUD
+  useEffect(() => {
+    let mounted = true
+    let last = performance.now()
+    let frames = 0
+    const loop = () => {
+      if (!mounted) return
+      frames += 1
+      const now = performance.now()
+      if (now - last >= 500) {
+        const fpsNow = Math.round((frames * 1000) / (now - last))
+        setFps(fpsNow)
+        frames = 0
+        last = now
+      }
+      requestAnimationFrame(loop)
+    }
+    const id = requestAnimationFrame(loop)
+    return () => { mounted = false; cancelAnimationFrame(id) }
+  }, [])
 
   const onWheel = throttle((e: any) => {
     e.evt.preventDefault()
@@ -377,7 +422,23 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
             )
           })}
         </Layer>
+        <FastLayer listening={false}>
+          {Object.entries(cursors).map(([id, c]) => {
+            const displayName = c.name || 'User'
+            const labelWidth = displayName.length * 7.5 + 16
+            return (
+              <Group key={id}>
+                <Circle x={c.x} y={c.y} radius={6} fill={c.color} stroke="white" strokeWidth={2} />
+                <Rect x={c.x + 10} y={c.y + 10} width={labelWidth} height={22} fill={c.color} cornerRadius={4} opacity={0.95} />
+                <Text x={c.x + 18} y={c.y + 15} text={displayName} fontSize={13} fontStyle="bold" fill="white" />
+              </Group>
+            )
+          })}
+        </FastLayer>
       </Stage>
+      <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '4px 8px', borderRadius: 4, fontSize: 12 }}>
+        FPS: {fps} | Cursor lag: ~{avgLagMs}ms
+      </div>
     </div>
   )
 }
