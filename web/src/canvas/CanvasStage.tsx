@@ -115,19 +115,6 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     const colorIndex = parseInt(uid.slice(0, 8), 36) % colors.length
     const color = colors[colorIndex]
     
-    let name = 'You'
-    // Try to fetch current user profile for display name
-    supabase.auth.getUser().then(async ({ data }) => {
-      const user = data.user
-      if (user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('display_name')
-          .eq('id', user.id)
-          .maybeSingle()
-        name = (profile?.display_name as string) || user.email || 'User'
-      }
-    })
     const channel = supabase.channel(`presence:canvas:${canvasId}`, { config: { presence: { key: uid } } })
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState() as Record<string, Array<any>>
@@ -153,6 +140,18 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     })
     channel.subscribe(async (status: any) => {
       if (status === 'SUBSCRIBED') {
+        // Fetch user name before tracking
+        let name = 'User'
+        const { data } = await supabase.auth.getUser()
+        const user = data.user
+        if (user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('display_name')
+            .eq('id', user.id)
+            .maybeSingle()
+          name = (profile?.display_name as string) || user.email || 'User'
+        }
         await channel.track({ x: 0, y: 0, name, color })
       }
     })
@@ -330,31 +329,34 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
               )
             }
           })}
-          {Object.entries(cursors).map(([id, c]) => (
-            <Group key={id}>
-              {/* Cursor pointer */}
-              <Circle x={c.x} y={c.y} radius={6} fill={c.color} stroke="white" strokeWidth={2} />
-              {/* Name label background */}
-              <Rect 
-                x={c.x + 12} 
-                y={c.y - 10} 
-                width={c.name.length * 8 + 12}
-                height={24}
-                fill={c.color}
-                cornerRadius={4}
-                opacity={0.9}
-              />
-              {/* Name label text */}
-              <Text 
-                x={c.x + 18} 
-                y={c.y - 5} 
-                text={c.name} 
-                fontSize={14}
-                fontStyle="bold"
-                fill="white"
-              />
-            </Group>
-          ))}
+          {Object.entries(cursors).map(([id, c]) => {
+            const displayName = c.name || 'User'
+            return (
+              <Group key={id}>
+                {/* Cursor pointer */}
+                <Circle x={c.x} y={c.y} radius={6} fill={c.color} stroke="white" strokeWidth={2} />
+                {/* Name label background */}
+                <Rect 
+                  x={c.x + 12} 
+                  y={c.y - 10} 
+                  width={displayName.length * 8 + 12}
+                  height={24}
+                  fill={c.color}
+                  cornerRadius={4}
+                  opacity={0.9}
+                />
+                {/* Name label text */}
+                <Text 
+                  x={c.x + 18} 
+                  y={c.y - 5} 
+                  text={displayName} 
+                  fontSize={14}
+                  fontStyle="bold"
+                  fill="white"
+                />
+              </Group>
+            )
+          })}
         </Layer>
       </Stage>
     </div>
