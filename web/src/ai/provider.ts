@@ -1,5 +1,4 @@
-// Pluggable provider adapter. Initial version is a stub that maps simple
-// structured prompts to tool calls without external network calls.
+// Vercel AI SDK provider using streaming function calls
 
 export type ParsedIntent =
   | { kind: 'create'; type: 'rect' | 'circle' | 'text'; x?: number; y?: number; width?: number; height?: number; color?: string; text?: string }
@@ -9,67 +8,167 @@ export type ParsedIntent =
   | { kind: 'layout-row'; ids?: string[]; spacing?: number }
   | { kind: 'layout-grid'; ids?: string[]; rows: number; cols: number; gap?: number }
   | { kind: 'distribute'; ids?: string[]; axis: 'x' | 'y'; spacing?: number }
-  | { kind: 'pattern-login'; }
+  | { kind: 'pattern-login'; x?: number; y?: number }
 
 export interface Provider {
-  parse(prompt: string): Promise<ParsedIntent>
-}
-
-function extractNumbers(s: string): number[] {
-  return (s.match(/-?\d+/g) || []).map((v) => parseInt(v, 10))
-}
-
-function extractColorHex(s: string): string | undefined {
-  const m = s.match(/#([0-9a-fA-F]{6})/)
-  return m ? `#${m[1]}` : undefined
+  parse(prompt: string, context: { canvasId: string; selectedIds?: string[] }): Promise<ParsedIntent[]>
 }
 
 export const provider: Provider = {
-  async parse(prompt: string): Promise<ParsedIntent> {
-    const p = prompt.trim().toLowerCase()
-    // naive patterns for initial version
-    if (p.startsWith('create') || p.startsWith('add') || p.startsWith('make')) {
-      const color = extractColorHex(p)
-      const nums = extractNumbers(p)
-      const hasText = p.includes('text') || p.includes('label')
-      if (p.includes('circle')) return { kind: 'create', type: 'circle', x: nums[0], y: nums[1], width: nums[2], height: nums[2], color }
-      if (hasText) return { kind: 'create', type: 'text', x: nums[0], y: nums[1], text: prompt.replace(/^[^']*'([^']+)'?.*$/s, '$1') }
-      return { kind: 'create', type: 'rect', x: nums[0], y: nums[1], width: nums[2], height: nums[3], color }
+  async parse(prompt: string, context: { canvasId: string; selectedIds?: string[] }): Promise<ParsedIntent[]> {
+    try {
+      const response = await fetch('/api/ai/canvas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          canvasId: context.canvasId,
+          selectedIds: context.selectedIds || [],
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`AI API error: ${response.statusText}`)
+      }
+
+      // Parse the streaming response
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No response body')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const toolCalls: any[] = []
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        
+        // Process complete JSON objects from the stream
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('0:')) continue
+          
+          try {
+            const json = JSON.parse(line.slice(2))
+            
+            // Extract tool calls from the stream
+            if (json.type === 'tool-call') {
+              toolCalls.push(json)
+            }
+          } catch (e) {
+            // Skip malformed JSON
+          }
+        }
+      }
+
+      // Convert tool calls to ParsedIntents
+      const intents: ParsedIntent[] = []
+      
+      for (const call of toolCalls) {
+        const toolName = call.toolName
+        const args = call.args
+
+        switch (toolName) {
+          case 'createShape':
+            intents.push({
+              kind: 'create',
+              type: args.type,
+              x: args.x,
+              y: args.y,
+              width: args.width,
+              height: args.height,
+              color: args.color,
+              text: args.text,
+            })
+            break
+
+          case 'moveShape':
+            intents.push({
+              kind: 'move',
+              id: args.id,
+              x: args.x,
+              y: args.y,
+            })
+            break
+
+          case 'resizeShape':
+            intents.push({
+              kind: 'resize',
+              id: args.id,
+              width: args.width,
+              height: args.height,
+            })
+            break
+
+          case 'rotateShape':
+            intents.push({
+              kind: 'rotate',
+              id: args.id,
+              degrees: args.degrees,
+            })
+            break
+
+          case 'arrangeRow':
+            intents.push({
+              kind: 'layout-row',
+              ids: context.selectedIds,
+              spacing: args.spacing,
+            })
+            break
+
+          case 'arrangeGrid':
+            intents.push({
+              kind: 'layout-grid',
+              ids: context.selectedIds,
+              rows: args.rows,
+              cols: args.cols,
+              gap: args.gap,
+            })
+            break
+
+          case 'distributeShapes':
+            intents.push({
+              kind: 'distribute',
+              ids: context.selectedIds,
+              axis: args.axis,
+              spacing: args.spacing,
+            })
+            break
+
+          case 'createLoginForm':
+            intents.push({
+              kind: 'pattern-login',
+              x: args.x,
+              y: args.y,
+            })
+            break
+        }
+      }
+
+      // Fallback: if no tool calls, try to create a basic shape
+      if (intents.length === 0) {
+        intents.push({
+          kind: 'create',
+          type: 'rect',
+          x: 100,
+          y: 100,
+        })
+      }
+
+      return intents
+    } catch (error: any) {
+      console.error('Provider parse error:', error)
+      // Fallback to a basic operation
+      return [{
+        kind: 'create',
+        type: 'rect',
+        x: 100 + Math.random() * 200,
+        y: 100 + Math.random() * 200,
+      }]
     }
-    if (p.startsWith('move')) {
-      const nums = extractNumbers(p)
-      return { kind: 'move', id: String(nums[0]), x: nums[1], y: nums[2] }
-    }
-    if (p.startsWith('resize')) {
-      const nums = extractNumbers(p)
-      return { kind: 'resize', id: String(nums[0]), width: nums[1], height: nums[2] }
-    }
-    if (p.startsWith('rotate')) {
-      const nums = extractNumbers(p)
-      return { kind: 'rotate', id: String(nums[0]), degrees: nums[1] }
-    }
-    if (p.includes('arrange') && p.includes('row')) {
-      const nums = extractNumbers(p)
-      return { kind: 'layout-row', spacing: nums[0] }
-    }
-    if (p.includes('grid')) {
-      const nums = extractNumbers(p)
-      const rows = nums[0] ?? 3
-      const cols = nums[1] ?? 3
-      const gap = nums[2]
-      return { kind: 'layout-grid', rows, cols, gap }
-    }
-    if (p.includes('distribute')) {
-      const axis: 'x' | 'y' = p.includes('vertical') ? 'y' : 'x'
-      const nums = extractNumbers(p)
-      return { kind: 'distribute', axis, spacing: nums[0] }
-    }
-    if (p.includes('login form')) {
-      return { kind: 'pattern-login' }
-    }
-    // default: create rect at random-ish
-    return { kind: 'create', type: 'rect' }
   },
 }
-
-

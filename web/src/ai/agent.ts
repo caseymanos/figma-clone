@@ -28,10 +28,17 @@ export async function runAgent(prompt: string, options: AgentRunOptions): Promis
 
   try {
     trackAIEvent('agent.run.start', { promptLength: prompt.length })
-    const intent = await provider.parse(prompt)
-    trackAIEvent('agent.intent.parsed', { kind: (intent as any).kind })
-    switch (intent.kind) {
-      case 'create': {
+    const intents = await provider.parse(prompt, {
+      canvasId: options.canvasId,
+      selectedIds: options.selectedIds,
+    })
+    trackAIEvent('agent.intent.parsed', { count: intents.length })
+    
+    // Execute each intent sequentially
+    for (const intent of intents) {
+      trackAIEvent('agent.intent.execute', { kind: (intent as any).kind })
+      switch (intent.kind) {
+        case 'create': {
         const s = push('Creating shape')
         await aiTools.createShape({
           type: intent.type,
@@ -92,17 +99,15 @@ export async function runAgent(prompt: string, options: AgentRunOptions): Promis
       }
       case 'pattern-login': {
         const s = push('Creating login form')
-        await buildLoginForm(options.canvasId)
+        await buildLoginForm(options.canvasId, intent.x, intent.y)
         s.status = 'success'
         break
       }
-      // Extendable patterns
-      case undefined: // fallthrough
-        break
       default: {
-        const s = push('No-op')
+        const s = push('Unknown command')
         s.status = 'success'
       }
+    }
     }
   } catch (e: any) {
     steps.push({ description: 'Agent failed', status: 'error', error: e?.message || String(e) })
