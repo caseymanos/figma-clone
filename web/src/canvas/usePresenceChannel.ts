@@ -46,18 +46,16 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
           color: latest.color || myColorRef.current
         }
 
-        // Update presence store (skip self)
-        if (key !== uid) {
-          addUser({
-            id: key,
-            displayName: latest.name || 'User',
-            avatarUrl: latest.avatarUrl,
-            status: 'online',
-            color: latest.color || myColorRef.current,
-            cursorX: latest.x,
-            cursorY: latest.y
-          })
-        }
+        // Update presence store (include all sessions)
+        addUser({
+          id: key,
+          displayName: latest.name || 'User',
+          avatarUrl: latest.avatarUrl,
+          status: 'online',
+          color: latest.color || myColorRef.current,
+          cursorX: latest.x,
+          cursorY: latest.y
+        })
       })
 
       // Remove users that left

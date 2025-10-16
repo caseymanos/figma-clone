@@ -3,15 +3,11 @@ import type { CSSProperties } from 'react'
 import { usePresenceState } from './presenceState'
 import { UserAvatar } from '../components/UserAvatar'
 
-interface PresenceSidebarProps {
-  currentUserId?: string
-}
-
-export function PresenceSidebar({ currentUserId }: PresenceSidebarProps) {
+export function PresenceSidebar() {
   const users = usePresenceState((state) => state.users)
   const [isCollapsed, setIsCollapsed] = useState(false)
   
-  const userList = Object.values(users).filter(u => u.id !== currentUserId)
+  const userList = Object.values(users) // Show all sessions
   const userCount = userList.length
 
   const sidebarStyle: CSSProperties = {

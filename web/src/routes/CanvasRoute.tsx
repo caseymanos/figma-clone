@@ -10,17 +10,10 @@ export default function CanvasRoute() {
   const { canvasId } = useParams()
   const [copied, setCopied] = useState(false)
   const [showProfileSettings, setShowProfileSettings] = useState(false)
-  const [currentUserId, setCurrentUserId] = useState<string | undefined>()
 
   useEffect(() => {
     if (!canvasId) navigate('/')
   }, [canvasId, navigate])
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setCurrentUserId(data.user?.id)
-    })
-  }, [])
 
   const copyToClipboard = () => {
     const url = window.location.href
@@ -94,7 +87,7 @@ export default function CanvasRoute() {
         </header>
         <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           {canvasId ? <CanvasStage canvasId={canvasId} /> : null}
-          {canvasId ? <PresenceSidebar currentUserId={currentUserId} /> : null}
+          {canvasId ? <PresenceSidebar /> : null}
         </div>
         {showProfileSettings && (
           <ProfileSettings onClose={() => setShowProfileSettings(false)} />
