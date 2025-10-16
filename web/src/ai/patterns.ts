@@ -1,4 +1,5 @@
-import { aiTools, CanvasId, ShapeId } from './tools'
+import { aiTools } from './tools'
+import type { CanvasId, ShapeId } from './tools'
 
 export async function buildLoginForm(canvasId: CanvasId, x: number = 100, y: number = 100) {
   await aiTools.createShape({ type: 'text', x, y, text: 'Username', fill: '#000000' }, canvasId)

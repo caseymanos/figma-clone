@@ -15,7 +15,7 @@ export default function CanvasRoute() {
   const [sessionName, setSessionName] = useState(() => localStorage.getItem('session_name') || '')
   const [sessionColor, setSessionColor] = useState(() => localStorage.getItem('session_color') || '#ef4444')
   const [sessionUpdateKey, setSessionUpdateKey] = useState(0)
-  const [showAI, setShowAI] = useState(true)
+  const showAI = true
 
   useEffect(() => {
     if (!canvasId) navigate('/')

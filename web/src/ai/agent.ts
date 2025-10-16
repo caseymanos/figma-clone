@@ -1,6 +1,6 @@
 import { aiTools } from './tools'
 import { provider } from './provider'
-import { buildLoginForm, buildNavbar, buildCard } from './patterns'
+import { buildLoginForm } from './patterns'
 import { trackAIEvent } from '../lib/metrics'
 
 export interface AgentRunOptions {

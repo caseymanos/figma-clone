@@ -7,7 +7,7 @@ interface SelectionState {
   clear: () => void
 }
 
-export const useSelection = create<SelectionState>((set, get) => ({
+export const useSelection = create<SelectionState>((set) => ({
   selectedIds: [],
   setSelectedIds: (ids) => set({ selectedIds: Array.from(new Set(ids)) }),
   toggleId: (id) => set((s) => {
