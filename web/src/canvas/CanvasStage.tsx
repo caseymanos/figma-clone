@@ -66,11 +66,13 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
             const r = payload.new
             upsertObject({
               id: r.id,
+              type: r.type,
               x: r.x,
               y: r.y,
               width: r.width,
               height: r.height,
               fill: r.fill || '#4f46e5',
+              text_content: r.text_content,
               updatedAt: r.updated_at,
             })
           } else if (payload.eventType === 'DELETE') {
@@ -88,11 +90,13 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         data?.forEach((r: any) =>
           upsertObject({
             id: r.id,
+            type: r.type,
             x: r.x,
             y: r.y,
             width: r.width,
             height: r.height,
             fill: r.fill || '#4f46e5',
+            text_content: r.text_content,
             updatedAt: r.updated_at,
           })
         )
@@ -213,23 +217,58 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     await supabase.from('objects').update(finalPos).eq('id', id)
   }, [upsertObject])
 
-  const addRect = async () => {
-    const { data, error } = await supabase
-      .from('objects')
-      .insert({ canvas_id: canvasId, type: 'rect', x: 100, y: 100, width: 120, height: 80, fill: '#4f46e5' })
+  const addShape = async (type: 'rect' | 'circle' | 'text') => {
+    let shapeData: any = {
+      canvas_id: canvasId,
+      type,
+      x: 100 + Math.random() * 200,
+      y: 100 + Math.random() * 200,
+      fill: '#4f46e5'
+    }
+
+    if (type === 'rect') {
+      shapeData = { ...shapeData, width: 120, height: 80 }
+    } else if (type === 'circle') {
+      shapeData = { ...shapeData, width: 80, height: 80 }
+    } else if (type === 'text') {
+      shapeData = { 
+        ...shapeData, 
+        text_content: 'Double-click to edit',
+        width: 200,
+        height: 40,
+        fill: '#000000'
+      }
+    }
+
+    const { error } = await supabase.from('objects').insert(shapeData)
     
     if (error) {
-      console.error('Failed to add rectangle:', error)
-      alert(`Failed to add rectangle: ${error.message}`)
-    } else {
-      console.log('Rectangle added:', data)
+      console.error(`Failed to add ${type}:`, error)
+      alert(`Failed to add ${type}: ${error.message}`)
     }
   }
 
   return (
     <div style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: 8, borderBottom: '1px solid #eee' }}>
-        <button onClick={addRect}>Add Rectangle</button>
+      <div style={{ padding: 8, borderBottom: '1px solid #eee', display: 'flex', gap: 8 }}>
+        <button 
+          onClick={() => addShape('rect')}
+          style={{ padding: '8px 16px', borderRadius: 4, border: '1px solid #4f46e5', background: 'white', cursor: 'pointer' }}
+        >
+          ⬜ Rectangle
+        </button>
+        <button 
+          onClick={() => addShape('circle')}
+          style={{ padding: '8px 16px', borderRadius: 4, border: '1px solid #4f46e5', background: 'white', cursor: 'pointer' }}
+        >
+          ⚫ Circle
+        </button>
+        <button 
+          onClick={() => addShape('text')}
+          style={{ padding: '8px 16px', borderRadius: 4, border: '1px solid #4f46e5', background: 'white', cursor: 'pointer' }}
+        >
+          T Text
+        </button>
       </div>
       <Stage
         ref={stageRef}
@@ -242,19 +281,50 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         onDragEnd={onStageDragEnd}
       >
         <Layer>
-          {objects.map((o) => (
-            <Rect
-              key={o.id}
-              x={o.x}
-              y={o.y}
-              width={o.width}
-              height={o.height}
-              fill={o.fill || '#4f46e5'}
-              draggable
-              onDragMove={onDragMove(o.id)}
-              onDragEnd={onDragEnd(o.id)}
-            />
-          ))}
+          {objects.map((o) => {
+            if (o.type === 'circle') {
+              return (
+                <Circle
+                  key={o.id}
+                  x={o.x}
+                  y={o.y}
+                  radius={(o.width || 80) / 2}
+                  fill={o.fill || '#4f46e5'}
+                  draggable
+                  onDragMove={onDragMove(o.id)}
+                  onDragEnd={onDragEnd(o.id)}
+                />
+              )
+            } else if (o.type === 'text') {
+              return (
+                <Text
+                  key={o.id}
+                  x={o.x}
+                  y={o.y}
+                  text={o.text_content || 'Text'}
+                  fontSize={20}
+                  fill={o.fill || '#000000'}
+                  draggable
+                  onDragMove={onDragMove(o.id)}
+                  onDragEnd={onDragEnd(o.id)}
+                />
+              )
+            } else {
+              return (
+                <Rect
+                  key={o.id}
+                  x={o.x}
+                  y={o.y}
+                  width={o.width}
+                  height={o.height}
+                  fill={o.fill || '#4f46e5'}
+                  draggable
+                  onDragMove={onDragMove(o.id)}
+                  onDragEnd={onDragEnd(o.id)}
+                />
+              )
+            }
+          })}
           {Object.entries(cursors).map(([id, c]) => (
             <Group key={id}>
               <Circle x={c.x} y={c.y} radius={3} fill={c.color} />

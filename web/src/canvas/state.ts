@@ -1,7 +1,17 @@
 import { create } from 'zustand'
 
 type Cursor = { x: number; y: number; name: string; color: string }
-type ObjectRecord = { id: string; x: number; y: number; width: number; height: number; fill?: string; updatedAt?: string }
+type ObjectRecord = { 
+  id: string
+  type?: string
+  x: number
+  y: number
+  width: number
+  height: number
+  fill?: string
+  text_content?: string
+  updatedAt?: string
+}
 
 interface CanvasState {
   cursors: Record<string, Cursor>
