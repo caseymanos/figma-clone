@@ -2,15 +2,25 @@ import { Suspense, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { CanvasStage } from '../canvas/CanvasStage'
+import { PresenceSidebar } from '../canvas/PresenceSidebar'
+import { ProfileSettings } from '../components/ProfileSettings'
 
 export default function CanvasRoute() {
   const navigate = useNavigate()
   const { canvasId } = useParams()
   const [copied, setCopied] = useState(false)
+  const [showProfileSettings, setShowProfileSettings] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | undefined>()
 
   useEffect(() => {
     if (!canvasId) navigate('/')
   }, [canvasId, navigate])
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setCurrentUserId(data.user?.id)
+    })
+  }, [])
 
   const copyToClipboard = () => {
     const url = window.location.href
@@ -58,7 +68,22 @@ export default function CanvasRoute() {
               {copied ? '✓ Copied!' : '📋 Copy Share Link'}
             </button>
           </div>
-          <div style={{ marginLeft: 'auto' }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button 
+              onClick={() => setShowProfileSettings(true)}
+              style={{ 
+                padding: '6px 12px', 
+                borderRadius: 4, 
+                border: '1px solid #ddd', 
+                background: 'white', 
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}
+            >
+              👤 Profile
+            </button>
             <button 
               onClick={() => supabase.auth.signOut()}
               style={{ padding: '6px 12px', borderRadius: 4, border: '1px solid #ddd', background: 'white', cursor: 'pointer' }}
@@ -67,9 +92,13 @@ export default function CanvasRoute() {
             </button>
           </div>
         </header>
-        <div style={{ flex: 1, minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           {canvasId ? <CanvasStage canvasId={canvasId} /> : null}
+          {canvasId ? <PresenceSidebar currentUserId={currentUserId} /> : null}
         </div>
+        {showProfileSettings && (
+          <ProfileSettings onClose={() => setShowProfileSettings(false)} />
+        )}
       </div>
     </Suspense>
   )

@@ -1,7 +1,9 @@
-import { Stage, Layer, Rect, Group, Circle, Text, FastLayer } from 'react-konva'
+import { Stage, Layer, Rect, Circle, Text } from 'react-konva'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useCanvasState } from './state'
+import { usePresenceChannel } from './usePresenceChannel'
+import Konva from 'konva'
 
 function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
   let last = 0
@@ -22,46 +24,41 @@ function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
   } as T
 }
 
+function lerp(start: number, end: number, t: number): number {
+  return start + (end - start) * t
+}
+
 export function CanvasStage({ canvasId }: { canvasId: string }) {
   const stageRef = useRef<any>(null)
+  const objectLayerRef = useRef<any>(null)
+  const cursorLayerRef = useRef<any>(null)
+  
   const [scale, setScale] = useState(1)
   const setScaleIfChanged = (next: number) => {
     setScale((prev) => (prev === next ? prev : next))
   }
+  
   const objectsRecord = useCanvasState((s) => s.objects)
   const objects = Object.values(objectsRecord)
   const upsertObject = useCanvasState((s) => s.upsertObject)
   const upsertMany = useCanvasState((s) => (s as any).upsertMany)
   const removeObject = useCanvasState((s) => s.removeObject)
-  const cursors = useCanvasState((s) => s.cursors)
-  const setCursorsRef = useRef(useCanvasState.getState().setCursors)
-  const lastPresenceRef = useRef<Record<string, { x: number; y: number; name: string; color: string }>>({})
-  const pendingPresenceRef = useRef<Record<string, { x: number; y: number; name: string; color: string }> | null>(null)
-  const presenceRafRef = useRef<number | null>(null)
 
-  // Update ref on every render to ensure it's current
   const [fps, setFps] = useState(0)
-  const [avgLagMs, setAvgLagMs] = useState(0)
-
-  useEffect(() => {
-    setCursorsRef.current = useCanvasState.getState().setCursors
-  })
-
-  const isSameCursors = useCallback((a: Record<string, any>, b: Record<string, any>) => {
-    const aKeys = Object.keys(a)
-    const bKeys = Object.keys(b)
-    if (aKeys.length !== bKeys.length) return false
-    for (const k of aKeys) {
-      const av = a[k]
-      const bv = b[k]
-      if (!bv || av.x !== bv.x || av.y !== bv.y || av.name !== bv.name || av.color !== bv.color) return false
-    }
-    return true
-  }, [])
 
   const pendingObjectsRef = useRef<Array<any>>([])
   const objectsRafRef = useRef<number | null>(null)
+  
+  // Cursor data store - ref-based, never triggers React renders
+  const cursorsDataRef = useRef<Record<string, {
+    current: { x: number; y: number }
+    target: { x: number; y: number }
+    name: string
+    color: string
+    group: Konva.Group | null
+  }>>({})
 
+  // Load initial objects and subscribe to changes
   useEffect(() => {
     const channel = supabase
       .channel(`objects:${canvasId}`)
@@ -123,110 +120,182 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     }
   }, [canvasId, upsertMany, removeObject])
 
-  useEffect(() => {
-    const uid = (window as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2)
-    
-    // Generate a unique color per session (not per user)
-    const colors = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
-    const colorIndex = parseInt(uid.slice(-8), 36) % colors.length
-    const color = colors[colorIndex]
-    
-    const channel = supabase.channel(`presence:canvas:${canvasId}`, { config: { presence: { key: uid } } })
-    
-    // Start with default name, update async
-    let currentName = 'User'
-    
-    channel.on('presence', { event: 'sync' }, () => {
-      const state = channel.presenceState() as Record<string, Array<any>>
-      const next: Record<string, { x: number; y: number; name: string; color: string }> = {}
-      const now = Date.now()
-      let lagSum = 0
-      let lagCount = 0
-      Object.entries(state).forEach(([key, arr]) => {
-        const latest = arr[arr.length - 1]
-        if (latest) {
-          next[key] = { x: latest.x, y: latest.y, name: latest.name || 'User', color: latest.color }
-          // Ignore our own session and stale timestamps (>2s)
-          const isSelf = key === uid
-          if (!isSelf && typeof latest.t === 'number') {
-            const age = now - latest.t
-            if (age >= 0 && age < 2000) {
-              lagSum += age
-              lagCount += 1
-            }
-          }
-        }
+  // CURSOR SYSTEM - Using shared presence hook
+  const handleCursorUpdate = useCallback((cursors: Record<string, { x: number; y: number; name: string; color: string }>) => {
+    const cursorLayer = cursorLayerRef.current
+    if (!cursorLayer) return
+
+    const seenIds = new Set<string>()
+
+    const createCursorGroup = (x: number, y: number, name: string, color: string) => {
+      const group = new Konva.Group({ listening: false })
+      const dot = new Konva.Circle({
+        x, y,
+        radius: 6,
+        fill: color,
+        stroke: 'white',
+        strokeWidth: 2,
       })
-      const prev = lastPresenceRef.current
-      if (isSameCursors(next, prev)) return
-      pendingPresenceRef.current = next
-      if (presenceRafRef.current == null) {
-        presenceRafRef.current = requestAnimationFrame(() => {
-          const snapshot = pendingPresenceRef.current
-          presenceRafRef.current = null
-          pendingPresenceRef.current = null
-          if (snapshot && !isSameCursors(snapshot, lastPresenceRef.current)) {
-            lastPresenceRef.current = snapshot
-            setCursorsRef.current(snapshot)
-          }
-          setAvgLagMs(lagCount ? Math.round(lagSum / lagCount) : 0)
-        })
-      }
-    })
-    
-    channel.subscribe(async (status: any) => {
-      if (status === 'SUBSCRIBED') {
-        // Track immediately with default name
-        await channel.track({ x: 0, y: 0, name: currentName, color, t: Date.now() })
-        
-        // Then fetch real name and update
-        const { data } = await supabase.auth.getUser()
-        const user = data.user
-        if (user) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('display_name')
-            .eq('id', user.id)
-            .maybeSingle()
-          const fetchedName = (profile?.display_name as string) || user.email?.split('@')[0] || 'User'
-          if (fetchedName !== currentName) {
-            currentName = fetchedName
-            await channel.track({ name: currentName, t: Date.now() })
+      const labelWidth = name.length * 7.5 + 16
+      const labelBg = new Konva.Rect({
+        x: x + 10,
+        y: y - 26,
+        width: labelWidth,
+        height: 20,
+        fill: color,
+        cornerRadius: 4,
+        opacity: 0.95,
+      })
+      const labelText = new Konva.Text({
+        x: x + 16,
+        y: y - 22,
+        text: name,
+        fontSize: 12,
+        fontStyle: 'bold',
+        fill: 'white',
+      })
+      group.add(dot, labelBg, labelText)
+      return group
+    }
+
+    Object.entries(cursors).forEach(([key, cursor]) => {
+      seenIds.add(key)
+      const cursorsData = cursorsDataRef.current
+      
+      if (!cursorsData[key]) {
+        // Create new cursor
+        const group = createCursorGroup(
+          cursor.x, 
+          cursor.y, 
+          cursor.name, 
+          cursor.color
+        )
+        cursorLayer.add(group)
+
+        cursorsData[key] = {
+          current: { x: cursor.x, y: cursor.y },
+          target: { x: cursor.x, y: cursor.y },
+          name: cursor.name,
+          color: cursor.color,
+          group,
+        }
+      } else {
+        // Update target position for interpolation
+        cursorsData[key].target = { x: cursor.x, y: cursor.y }
+
+        // Update label if name changed
+        if (cursorsData[key].name !== cursor.name) {
+          const group = cursorsData[key].group
+          if (group) {
+            const children = group.getChildren()
+            const labelText = children[2] as Konva.Text
+            const labelBg = children[1] as Konva.Rect
+            labelText.text(cursor.name)
+            const labelWidth = cursor.name.length * 7.5 + 16
+            labelBg.width(labelWidth)
+            cursorsData[key].name = cursor.name
           }
         }
       }
     })
 
-    // Cursor update with threshold + visibility awareness
+    // Remove cursors that left
+    const cursorsData = cursorsDataRef.current
+    Object.keys(cursorsData).forEach(id => {
+      if (!seenIds.has(id)) {
+        cursorsData[id].group?.destroy()
+        delete cursorsData[id]
+      }
+    })
+
+    cursorLayer.batchDraw()
+  }, [])
+
+  const { trackCursor } = usePresenceChannel({
+    canvasId,
+    onCursorUpdate: handleCursorUpdate
+  })
+
+  // Animation loop for smooth cursor interpolation
+  useEffect(() => {
+    const anim = new Konva.Animation(() => {
+      const cursorLayer = cursorLayerRef.current
+      if (!cursorLayer) return
+
+      let needsRedraw = false
+      const cursorsData = cursorsDataRef.current
+
+      Object.values(cursorsData).forEach(cursor => {
+        if (!cursor.group) return
+
+        // Smooth interpolation
+        const lerpFactor = 0.3
+        const newX = lerp(cursor.current.x, cursor.target.x, lerpFactor)
+        const newY = lerp(cursor.current.y, cursor.target.y, lerpFactor)
+
+        if (Math.abs(newX - cursor.current.x) > 0.1 || Math.abs(newY - cursor.current.y) > 0.1) {
+          cursor.current.x = newX
+          cursor.current.y = newY
+          
+          const children = cursor.group.getChildren()
+          const dot = children[0] as Konva.Circle
+          const labelBg = children[1] as Konva.Rect
+          const labelText = children[2] as Konva.Text
+
+          dot.position({ x: newX, y: newY })
+          labelBg.position({ x: newX + 10, y: newY - 26 })
+          labelText.position({ x: newX + 16, y: newY - 22 })
+
+          needsRedraw = true
+        }
+      })
+
+      if (needsRedraw) {
+        cursorLayer.batchDraw()
+      }
+    }, cursorLayerRef.current?.getLayer())
+
+    anim.start()
+
+    return () => {
+      anim.stop()
+      Object.values(cursorsDataRef.current).forEach(cursor => cursor.group?.destroy())
+    }
+  }, [])
+
+  // Broadcast cursor position on mouse move
+  useEffect(() => {
     let lastPos = { x: 0, y: 0 }
-    const minDelta = 2
+    const minDelta = 3
     const tickMs = 50
     let lastTick = 0
+    
     const handleMove = () => {
       const now = performance.now()
       if (now - lastTick < tickMs) return
       lastTick = now
       if (document.hidden) return
+      
       const pos = stageRef.current?.getPointerPosition()
       if (!pos) return
+      
       const dx = Math.abs(pos.x - lastPos.x)
       const dy = Math.abs(pos.y - lastPos.y)
       if (dx < minDelta && dy < minDelta) return
+      
       lastPos = { x: pos.x, y: pos.y }
-      channel.track({ x: pos.x, y: pos.y, t: Date.now() })
+      trackCursor(pos.x, pos.y)
     }
 
-    const node = stageRef.current?.getStage()
-    node?.on('mousemove', handleMove)
+    const stage = stageRef.current?.getStage()
+    stage?.on('mousemove', handleMove)
+
     return () => {
-      node?.off('mousemove', handleMove)
-      supabase.removeChannel(channel)
-      if (presenceRafRef.current != null) cancelAnimationFrame(presenceRafRef.current)
-      if (dragRafRef.current != null) cancelAnimationFrame(dragRafRef.current)
+      stage?.off('mousemove', handleMove)
     }
-  }, [canvasId])
+  }, [trackCursor])
 
-  // FPS HUD
+  // FPS counter
   useEffect(() => {
     let mounted = true
     let last = performance.now()
@@ -263,33 +332,29 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     stage.position(newPos)
   }, 16)
 
-  // no-op: stage position is uncontrolled; we don't mirror into React state
   const onStageDragEnd = () => {}
 
-  const dragUpdateRef = useRef<{ id: string; x: number; y: number } | null>(null)
-  const dragRafRef = useRef<number | null>(null)
+  // Event delegation for object dragging
+  const onLayerDragEnd = useCallback((e: any) => {
+    const shape = e.target
+    if (shape === objectLayerRef.current) return
 
-  const onDragMove = useCallback((id: string) => (e: any) => {
-    const node = e.target
-    dragUpdateRef.current = { id, x: node.x(), y: node.y() }
-    if (dragRafRef.current === null) {
-      dragRafRef.current = requestAnimationFrame(() => {
-        const pending = dragUpdateRef.current
-        dragRafRef.current = null
-        if (pending) {
-          supabase.from('objects').update({ x: pending.x, y: pending.y }).eq('id', pending.id)
-        }
-      })
-    }
-  }, [])
+    const id = shape.attrs.id
+    if (!id) return
 
-  const onDragEnd = useCallback((id: string) => async (e: any) => {
-    const node = e.target
-    const finalPos = { x: node.x(), y: node.y() }
-    // Update local state with final position
-    upsertObject({ id, ...finalPos, width: node.width(), height: node.height() })
-    // Send final position to DB (will be echoed back via postgres_changes)
-    await supabase.from('objects').update(finalPos).eq('id', id)
+    const finalPos = { x: shape.x(), y: shape.y() }
+    
+    // Update local state immediately
+    upsertObject({ 
+      id, 
+      x: finalPos.x, 
+      y: finalPos.y,
+      width: shape.width(),
+      height: shape.height()
+    })
+    
+    // Broadcast to other users
+    supabase.from('objects').update({ x: finalPos.x, y: finalPos.y }).eq('id', id).then()
   }, [upsertObject])
 
   const addShape = async (type: 'rect' | 'circle' | 'text') => {
@@ -355,71 +420,56 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         onWheel={onWheel}
         onDragEnd={onStageDragEnd}
       >
-        <Layer>
+        <Layer ref={objectLayerRef} onDragEnd={onLayerDragEnd}>
           {objects.map((o) => {
+            const commonProps = {
+              id: o.id,
+              key: o.id,
+              draggable: true,
+            }
+
             if (o.type === 'circle') {
               return (
                 <Circle
-                  key={o.id}
+                  {...commonProps}
                   x={o.x}
                   y={o.y}
                   radius={(o.width || 80) / 2}
                   fill={o.fill || '#4f46e5'}
-                  draggable
-                  onDragMove={onDragMove(o.id)}
-                  onDragEnd={onDragEnd(o.id)}
                 />
               )
             } else if (o.type === 'text') {
               return (
                 <Text
-                  key={o.id}
+                  {...commonProps}
                   x={o.x}
                   y={o.y}
                   text={o.text_content || 'Text'}
                   fontSize={20}
                   fill={o.fill || '#000000'}
-                  draggable
-                  onDragMove={onDragMove(o.id)}
-                  onDragEnd={onDragEnd(o.id)}
                 />
               )
             } else {
               return (
                 <Rect
-                  key={o.id}
+                  {...commonProps}
                   x={o.x}
                   y={o.y}
                   width={o.width}
                   height={o.height}
                   fill={o.fill || '#4f46e5'}
-                  draggable
-                  onDragMove={onDragMove(o.id)}
-                  onDragEnd={onDragEnd(o.id)}
                 />
               )
             }
           })}
-          {Object.entries(cursors).map(() => null)}
         </Layer>
-        <FastLayer listening={false}>
-          {Object.entries(cursors).map(([id, c]) => {
-            const displayName = c.name || 'User'
-            const labelWidth = displayName.length * 7.5 + 16
-            return (
-              <Group key={id} listening={false}>
-                <Circle x={c.x} y={c.y} radius={6} fill={c.color} stroke="white" strokeWidth={2} />
-                <Rect x={c.x + 10} y={c.y - 26} width={labelWidth} height={20} fill={c.color} cornerRadius={4} opacity={0.95} />
-                <Text x={c.x + 16} y={c.y - 22} text={displayName} fontSize={12} fontStyle="bold" fill="white" />
-              </Group>
-            )
-          })}
-        </FastLayer>
+        
+        {/* Cursor layer - managed entirely by refs, never re-renders */}
+        <Layer ref={cursorLayerRef} listening={false} />
       </Stage>
       <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '4px 8px', borderRadius: 4, fontSize: 12 }}>
-        FPS: {fps} | Cursor lag: ~{avgLagMs}ms
+        FPS: {fps}
       </div>
     </div>
   )
 }
-

@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 
-type Cursor = { x: number; y: number; name: string; color: string }
 type ObjectRecord = { 
   id: string
   type?: string
@@ -14,17 +13,13 @@ type ObjectRecord = {
 }
 
 interface CanvasState {
-  cursors: Record<string, Cursor>
   objects: Record<string, ObjectRecord>
   upsertObject: (o: ObjectRecord) => void
   upsertMany: (os: ObjectRecord[]) => void
   removeObject: (id: string) => void
-  setCursor: (id: string, c: Cursor) => void
-  setCursors: (cs: Record<string, Cursor>) => void
 }
 
 export const useCanvasState = create<CanvasState>((set) => ({
-  cursors: {},
   objects: {},
   upsertObject: (o) => set((s) => {
     const prev = s.objects[o.id]
@@ -67,6 +62,4 @@ export const useCanvasState = create<CanvasState>((set) => ({
     return { objects: nextObjects }
   }),
   removeObject: (id) => set((s) => { const { [id]: _, ...rest } = s.objects; return { objects: rest } }),
-  setCursor: (id, c) => set((s) => ({ cursors: { ...s.cursors, [id]: c } })),
-  setCursors: (cs) => set(() => ({ cursors: cs })),
 }))

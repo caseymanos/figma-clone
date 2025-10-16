@@ -8,6 +8,8 @@ create table if not exists public.profiles (
   username text unique,
   display_name text,
   avatar_url text,
+  status text check (status in ('online','away','busy')) default 'online',
+  last_seen timestamptz default now(),
   created_at timestamptz default now()
 );
 
@@ -79,4 +81,26 @@ create policy objects_member_mutate on public.objects for all using (
     where m.canvas_id = objects.canvas_id and m.user_id = auth.uid()
   )
 );
+
+-- Storage bucket for avatars
+insert into storage.buckets (id, name, public) 
+values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
+
+-- Storage policies for avatars
+create policy "Avatar images are publicly accessible"
+on storage.objects for select
+using ( bucket_id = 'avatars' );
+
+create policy "Authenticated users can upload avatars"
+on storage.objects for insert
+with check ( bucket_id = 'avatars' and auth.role() = 'authenticated' );
+
+create policy "Users can update their own avatars"
+on storage.objects for update
+using ( bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1] );
+
+create policy "Users can delete their own avatars"
+on storage.objects for delete
+using ( bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1] );
 

@@ -29,7 +29,13 @@ export function AuthGate({ children }: PropsWithChildren) {
     if (!u) return
     const displayName = (u.user_metadata && (u.user_metadata.full_name || u.user_metadata.name)) || u.email || 'User'
     const avatarUrl = (u.user_metadata && (u.user_metadata.avatar_url || u.user_metadata.picture)) || null
-    supabase.from('profiles').upsert({ id: u.id, display_name: displayName, avatar_url: avatarUrl }).then(() => {})
+    supabase.from('profiles').upsert({ 
+      id: u.id, 
+      display_name: displayName, 
+      avatar_url: avatarUrl,
+      status: 'online',
+      last_seen: new Date().toISOString()
+    }).then(() => {})
   }, [user])
 
   if (!session || !user) {
