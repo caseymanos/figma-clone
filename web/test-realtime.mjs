@@ -131,6 +131,7 @@ setTimeout(() => {
   console.log('   1. Run: cd web && npm run dev')
   console.log('   2. Open canvas in multiple browsers')
   console.log('   3. Watch presence sidebar and cursors sync\n')
+  console.log('   4. Try AI panel: create, move, layout commands')
   
   // Cleanup
   supabase.removeChannel(presenceChannel)

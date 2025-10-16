@@ -249,3 +249,4 @@ export function SessionSettings({ onSettingsChange, currentName, currentColor }:
   )
 }
 
+

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useCanvasState } from './state'
 import { usePresenceChannel } from './usePresenceChannel'
+import { useSelection } from './selection'
 import Konva from 'konva'
 
 function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
@@ -43,6 +44,9 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
   const upsertObject = useCanvasState((s) => s.upsertObject)
   const upsertMany = useCanvasState((s) => (s as any).upsertMany)
   const removeObject = useCanvasState((s) => s.removeObject)
+  const selectedIds = useSelection((s) => s.selectedIds)
+  const setSelectedIds = useSelection((s) => s.setSelectedIds)
+  const toggleId = useSelection((s) => s.toggleId)
 
   const [fps, setFps] = useState(0)
 
@@ -400,6 +404,18 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     }
   }
 
+  const onShapeClick = (e: any) => {
+    const shape = e.target
+    const id = shape?.attrs?.id
+    if (!id) return
+    const isShift = e.evt?.shiftKey
+    if (isShift) {
+      toggleId(id)
+    } else {
+      setSelectedIds([id])
+    }
+  }
+
   return (
     <div style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: 8, borderBottom: '1px solid #eee', display: 'flex', gap: 8 }}>
@@ -438,9 +454,11 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
               id: o.id,
               key: o.id,
               draggable: true,
+              onClick: onShapeClick,
             }
 
             if (o.type === 'circle') {
+              const isSelected = selectedIds.includes(o.id)
               return (
                 <Circle
                   {...commonProps}
@@ -448,9 +466,12 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
                   y={o.y}
                   radius={(o.width || 80) / 2}
                   fill={o.fill || '#4f46e5'}
+                  stroke={isSelected ? '#10b981' : undefined}
+                  strokeWidth={isSelected ? 3 : 0}
                 />
               )
             } else if (o.type === 'text') {
+              const isSelected = selectedIds.includes(o.id)
               return (
                 <Text
                   {...commonProps}
@@ -459,9 +480,12 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
                   text={o.text_content || 'Text'}
                   fontSize={20}
                   fill={o.fill || '#000000'}
+                  stroke={isSelected ? '#10b981' : undefined}
+                  strokeWidth={isSelected ? 2 : 0}
                 />
               )
             } else {
+              const isSelected = selectedIds.includes(o.id)
               return (
                 <Rect
                   {...commonProps}
@@ -470,6 +494,8 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
                   width={o.width}
                   height={o.height}
                   fill={o.fill || '#4f46e5'}
+                  stroke={isSelected ? '#10b981' : undefined}
+                  strokeWidth={isSelected ? 3 : 0}
                 />
               )
             }

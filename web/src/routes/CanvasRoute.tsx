@@ -5,6 +5,7 @@ import { CanvasStage } from '../canvas/CanvasStage'
 import { PresenceSidebar } from '../canvas/PresenceSidebar'
 import { ProfileSettings } from '../components/ProfileSettings'
 import { SessionSettings } from '../components/SessionSettings'
+import { AIPanel } from '../components/AIPanel'
 
 export default function CanvasRoute() {
   const navigate = useNavigate()
@@ -14,6 +15,7 @@ export default function CanvasRoute() {
   const [sessionName, setSessionName] = useState(() => localStorage.getItem('session_name') || '')
   const [sessionColor, setSessionColor] = useState(() => localStorage.getItem('session_color') || '#ef4444')
   const [sessionUpdateKey, setSessionUpdateKey] = useState(0)
+  const [showAI, setShowAI] = useState(true)
 
   useEffect(() => {
     if (!canvasId) navigate('/')
@@ -103,6 +105,7 @@ export default function CanvasRoute() {
             <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
               {canvasId ? <CanvasStage key={sessionUpdateKey} canvasId={canvasId} /> : null}
               {canvasId ? <PresenceSidebar /> : null}
+              {canvasId && showAI ? <AIPanel canvasId={canvasId} /> : null}
             </div>
         {showProfileSettings && (
           <ProfileSettings onClose={() => setShowProfileSettings(false)} />
