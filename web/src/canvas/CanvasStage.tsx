@@ -109,7 +109,12 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
 
   useEffect(() => {
     const uid = (window as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2)
-    let color = '#ef4444'
+    
+    // Generate a unique color based on UID
+    const colors = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
+    const colorIndex = parseInt(uid.slice(0, 8), 36) % colors.length
+    const color = colors[colorIndex]
+    
     let name = 'You'
     // Try to fetch current user profile for display name
     supabase.auth.getUser().then(async ({ data }) => {
@@ -327,8 +332,27 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
           })}
           {Object.entries(cursors).map(([id, c]) => (
             <Group key={id}>
-              <Circle x={c.x} y={c.y} radius={3} fill={c.color} />
-              <Text x={c.x + 6} y={c.y - 6} text={c.name} fontSize={12} />
+              {/* Cursor pointer */}
+              <Circle x={c.x} y={c.y} radius={6} fill={c.color} stroke="white" strokeWidth={2} />
+              {/* Name label background */}
+              <Rect 
+                x={c.x + 12} 
+                y={c.y - 10} 
+                width={c.name.length * 8 + 12}
+                height={24}
+                fill={c.color}
+                cornerRadius={4}
+                opacity={0.9}
+              />
+              {/* Name label text */}
+              <Text 
+                x={c.x + 18} 
+                y={c.y - 5} 
+                text={c.name} 
+                fontSize={14}
+                fontStyle="bold"
+                fill="white"
+              />
             </Group>
           ))}
         </Layer>
