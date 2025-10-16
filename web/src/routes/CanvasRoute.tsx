@@ -4,12 +4,16 @@ import { supabase } from '../lib/supabaseClient'
 import { CanvasStage } from '../canvas/CanvasStage'
 import { PresenceSidebar } from '../canvas/PresenceSidebar'
 import { ProfileSettings } from '../components/ProfileSettings'
+import { SessionSettings } from '../components/SessionSettings'
 
 export default function CanvasRoute() {
   const navigate = useNavigate()
   const { canvasId } = useParams()
   const [copied, setCopied] = useState(false)
   const [showProfileSettings, setShowProfileSettings] = useState(false)
+  const [sessionName, setSessionName] = useState(() => localStorage.getItem('session_name') || '')
+  const [sessionColor, setSessionColor] = useState(() => localStorage.getItem('session_color') || '#ef4444')
+  const [sessionUpdateKey, setSessionUpdateKey] = useState(0)
 
   useEffect(() => {
     if (!canvasId) navigate('/')
@@ -21,6 +25,12 @@ export default function CanvasRoute() {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
+  }
+
+  const handleSessionSettingsChange = (name: string, color: string) => {
+    setSessionName(name)
+    setSessionColor(color)
+    setSessionUpdateKey(prev => prev + 1) // Force re-render of CanvasStage
   }
 
   return (
@@ -62,6 +72,11 @@ export default function CanvasRoute() {
             </button>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <SessionSettings
+              onSettingsChange={handleSessionSettingsChange}
+              currentName={sessionName}
+              currentColor={sessionColor}
+            />
             <button 
               onClick={() => setShowProfileSettings(true)}
               style={{ 
@@ -85,10 +100,10 @@ export default function CanvasRoute() {
             </button>
           </div>
         </header>
-        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-          {canvasId ? <CanvasStage canvasId={canvasId} /> : null}
-          {canvasId ? <PresenceSidebar /> : null}
-        </div>
+            <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+              {canvasId ? <CanvasStage key={sessionUpdateKey} canvasId={canvasId} /> : null}
+              {canvasId ? <PresenceSidebar /> : null}
+            </div>
         {showProfileSettings && (
           <ProfileSettings onClose={() => setShowProfileSettings(false)} />
         )}

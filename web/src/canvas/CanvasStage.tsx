@@ -216,7 +216,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     onCursorUpdate: handleCursorUpdate
   })
 
-  // Animation loop for smooth cursor interpolation
+  // Animation loop for smooth cursor interpolation - OPTIMIZED
   useEffect(() => {
     const anim = new Konva.Animation(() => {
       const cursorLayer = cursorLayerRef.current
@@ -228,12 +228,24 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       Object.values(cursorsData).forEach(cursor => {
         if (!cursor.group) return
 
-        // Smooth interpolation
-        const lerpFactor = 0.3
+        // Adaptive interpolation - faster when cursor is moving quickly
+        const dx = cursor.target.x - cursor.current.x
+        const dy = cursor.target.y - cursor.current.y
+        const distance = Math.sqrt(dx * dx + dy * dy)
+        
+        // Dynamic lerp factor: faster for larger distances (better responsiveness)
+        let lerpFactor = 0.4 // Base speed (was 0.3)
+        if (distance > 100) {
+          lerpFactor = 0.7 // Much faster for big jumps
+        } else if (distance > 50) {
+          lerpFactor = 0.55 // Faster for medium distances
+        }
+        
         const newX = lerp(cursor.current.x, cursor.target.x, lerpFactor)
         const newY = lerp(cursor.current.y, cursor.target.y, lerpFactor)
 
-        if (Math.abs(newX - cursor.current.x) > 0.1 || Math.abs(newY - cursor.current.y) > 0.1) {
+        // Lower threshold for more responsive updates
+        if (Math.abs(newX - cursor.current.x) > 0.05 || Math.abs(newY - cursor.current.y) > 0.05) {
           cursor.current.x = newX
           cursor.current.y = newY
           
@@ -263,11 +275,11 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     }
   }, [])
 
-  // Broadcast cursor position on mouse move
+  // Broadcast cursor position on mouse move - OPTIMIZED FOR 60FPS
   useEffect(() => {
     let lastPos = { x: 0, y: 0 }
-    const minDelta = 3
-    const tickMs = 50
+    const minDelta = 2 // Reduced for smoother tracking
+    const tickMs = 16 // ~60fps (was 50ms = 20fps)
     let lastTick = 0
     
     const handleMove = () => {

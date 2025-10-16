@@ -7,6 +7,13 @@ interface UsePresenceChannelOptions {
   onCursorUpdate?: (cursors: Record<string, { x: number; y: number; name: string; color: string }>) => void
 }
 
+// Get session settings from localStorage
+function getSessionSettings() {
+  const sessionName = localStorage.getItem('session_name')
+  const sessionColor = localStorage.getItem('session_color')
+  return { sessionName, sessionColor }
+}
+
 export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChannelOptions) {
   const addUser = usePresenceState((state) => state.addUser)
   const removeUser = usePresenceState((state) => state.removeUser)
@@ -21,9 +28,15 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
     const uid = (window as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2)
     myIdRef.current = uid
     
-    const colors = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
-    const colorIndex = parseInt(uid.slice(-8), 36) % colors.length
-    myColorRef.current = colors[colorIndex]
+    // Use session color or generate random one
+    const { sessionColor } = getSessionSettings()
+    if (sessionColor) {
+      myColorRef.current = sessionColor
+    } else {
+      const colors = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
+      const colorIndex = parseInt(uid.slice(-8), 36) % colors.length
+      myColorRef.current = colors[colorIndex]
+    }
 
     const channel = supabase.channel(`presence:canvas:${canvasId}`, { 
       config: { presence: { key: uid } } 
@@ -83,7 +96,11 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
         let displayName = 'User'
         let avatarUrl: string | undefined = undefined
         
-        if (user) {
+        // Check for session-specific name first
+        const { sessionName } = getSessionSettings()
+        if (sessionName) {
+          displayName = sessionName
+        } else if (user) {
           const { data: profile } = await supabase
             .from('profiles')
             .select('display_name, avatar_url')
@@ -92,8 +109,8 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
           
           displayName = (profile?.display_name as string) || user.email?.split('@')[0] || user.user_metadata?.full_name || user.user_metadata?.name || 'User'
           avatarUrl = profile?.avatar_url as string | undefined
-          myNameRef.current = displayName
         }
+        myNameRef.current = displayName
         
         // Initial track with correct name
         await channel.track({ 
@@ -112,13 +129,30 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
     }
   }, [canvasId, addUser, removeUser, updateUser, onCursorUpdate])
 
+  // Method to update session settings
+  const updateSessionSettings = (name: string, color: string) => {
+    myNameRef.current = name
+    myColorRef.current = color
+    
+    // Broadcast updated settings
+    if (channelRef.current) {
+      channelRef.current.track({
+        name: name,
+        color: color,
+        t: Date.now()
+      })
+    }
+  }
+
   return {
     trackCursor: (x: number, y: number) => {
       if (channelRef.current) {
         channelRef.current.track({ x, y, t: Date.now() })
       }
     },
+    updateSessionSettings,
     myId: myIdRef.current,
+    myName: myNameRef.current,
     myColor: myColorRef.current
   }
 }
