@@ -63,8 +63,10 @@ export function ProfileSettings({ onClose }: ProfileSettingsProps) {
       if (error) throw error
 
       setMessage({ type: 'success', text: 'Profile updated successfully!' })
+      
+      // Trigger a page reload to refresh presence with new name
       setTimeout(() => {
-        onClose()
+        window.location.reload()
       }, 1000)
     } catch (error: any) {
       setMessage({ type: 'error', text: error.message || 'Failed to update profile' })

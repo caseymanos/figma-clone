@@ -78,18 +78,13 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
     // Subscribe and fetch user info
     channel.subscribe(async (status: any) => {
       if (status === 'SUBSCRIBED') {
-        // Initial track
-        await channel.track({ 
-          x: 0, 
-          y: 0, 
-          name: myNameRef.current, 
-          color: myColorRef.current, 
-          t: Date.now() 
-        })
-        
-        // Fetch user profile
+        // Fetch user profile FIRST, before initial track
         const { data } = await supabase.auth.getUser()
         const user = data.user
+        
+        let displayName = 'User'
+        let avatarUrl: string | undefined = undefined
+        
         if (user) {
           const { data: profile } = await supabase
             .from('profiles')
@@ -97,18 +92,20 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
             .eq('id', user.id)
             .maybeSingle()
           
-          const fetchedName = (profile?.display_name as string) || user.email?.split('@')[0] || 'User'
-          const avatarUrl = profile?.avatar_url as string | undefined
-          
-          if (fetchedName !== myNameRef.current) {
-            myNameRef.current = fetchedName
-            await channel.track({ 
-              name: myNameRef.current, 
-              avatarUrl: avatarUrl,
-              t: Date.now() 
-            })
-          }
+          displayName = (profile?.display_name as string) || user.email?.split('@')[0] || user.user_metadata?.full_name || user.user_metadata?.name || 'User'
+          avatarUrl = profile?.avatar_url as string | undefined
+          myNameRef.current = displayName
         }
+        
+        // Initial track with correct name
+        await channel.track({ 
+          x: 0, 
+          y: 0, 
+          name: displayName,
+          avatarUrl: avatarUrl,
+          color: myColorRef.current, 
+          t: Date.now() 
+        })
       }
     })
 
