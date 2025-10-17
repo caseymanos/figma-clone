@@ -3,6 +3,7 @@ import { streamText, tool } from 'ai'
 import { z } from 'zod'
 
 export const runtime = 'edge'
+export const maxDuration = 30 // 30 second timeout
 
 // Tool definitions matching canvas operations
 // For client-side execution, execute returns params which client handles
@@ -122,7 +123,7 @@ For complex requests like "login form", use the specialized pattern tools.`
       system: systemPrompt,
       prompt,
       tools,
-      maxSteps: 5, // Allow multi-step reasoning for tool calls
+      // No maxSteps - we want single-pass tool generation for client-side execution
     })
 
     // Return as data stream with tool calls
