@@ -28,6 +28,14 @@ export function useKeyboardShortcuts({
   const { activeTool, setActiveTool, clipboard, setClipboard } = useToolState()
   const { selectedIds, setSelectedIds, clear: clearSelection } = useSelection()
 
+  // Track temporary pan mode with space bar
+  const tempPanRef = useCallback((enabled: boolean) => {
+    const stage = document.querySelector('canvas')?.parentElement
+    if (stage && enabled) {
+      stage.style.cursor = 'grab'
+    }
+  }, [])
+
   const handleCopy = useCallback(() => {
     const selectedObjects = selectedIds
       .map(id => objects[id])
@@ -76,6 +84,9 @@ export function useKeyboardShortcuts({
   }, [objects, setSelectedIds])
 
   useEffect(() => {
+    let spacePressed = false
+    let previousTool: string | null = null
+
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger shortcuts when typing in inputs
       const target = e.target as HTMLElement
@@ -84,6 +95,16 @@ export function useKeyboardShortcuts({
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable
       ) {
+        return
+      }
+
+      // Space for temporary pan
+      if (e.code === 'Space' && !spacePressed && activeTool !== 'pan') {
+        e.preventDefault()
+        spacePressed = true
+        previousTool = activeTool
+        setActiveTool('pan')
+        tempPanRef(true)
         return
       }
 
@@ -209,9 +230,25 @@ export function useKeyboardShortcuts({
       }
     }
 
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && spacePressed) {
+        spacePressed = false
+        if (previousTool) {
+          setActiveTool(previousTool as any)
+          previousTool = null
+        }
+        tempPanRef(false)
+      }
+    }
+
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
   }, [
+    activeTool,
     setActiveTool,
     clearSelection,
     selectedIds,
@@ -223,6 +260,7 @@ export function useKeyboardShortcuts({
     handleCopy,
     handlePaste,
     handleSelectAll,
+    tempPanRef,
   ])
 
   return { activeTool }

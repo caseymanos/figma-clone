@@ -6,12 +6,11 @@ import { useToolState } from '../canvas/state'
 import type { Tool } from '../canvas/state'
 
 interface BottomToolbarProps {
-  onAddShape: (type: 'rect' | 'circle' | 'text') => void
   onZoomIn?: () => void
   onZoomOut?: () => void
 }
 
-export function BottomToolbar({ onAddShape, onZoomIn, onZoomOut }: BottomToolbarProps) {
+export function BottomToolbar({ onZoomIn, onZoomOut }: BottomToolbarProps) {
   const { activeTool, setActiveTool } = useToolState()
   const toolbarStyle: CSSProperties = {
     position: 'fixed',
@@ -122,10 +121,6 @@ export function BottomToolbar({ onAddShape, onZoomIn, onZoomOut }: BottomToolbar
 
   const handleToolClick = (tool: Tool) => {
     setActiveTool(tool)
-    // Auto-create shape when tool is selected
-    if (tool === 'rect' || tool === 'circle' || tool === 'text') {
-      onAddShape(tool as 'rect' | 'circle' | 'text')
-    }
   }
 
   return (

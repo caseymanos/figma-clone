@@ -173,34 +173,57 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
     }
   }, [updateSessionSettings])
 
+  // Smart debouncing with dead zone
+  const lastBroadcastPos = useRef({ x: 0, y: 0 })
+  const lastBroadcastTime = useRef(0)
+  const DEAD_ZONE = 2  // Pixels - don't broadcast tiny movements
+  const MIN_BROADCAST_INTERVAL = 50  // ms (20fps max)
+
   return {
     trackCursor: (x: number, y: number) => {
-      if (channelRef.current) {
-        // Only include metadata if it changed (reduces payload by 50%)
-        const currentMetadata = { name: myNameRef.current, color: myColorRef.current }
-        const metadataChanged = 
-          lastMetadataBroadcastRef.current.name !== currentMetadata.name ||
-          lastMetadataBroadcastRef.current.color !== currentMetadata.color
-        
-        if (metadataChanged) {
-          // Full update with metadata
-          channelRef.current.track({ 
-            x, 
-            y, 
-            name: currentMetadata.name,
-            color: currentMetadata.color,
-            t: Date.now() 
-          })
-          lastMetadataBroadcastRef.current = currentMetadata
-        } else {
-          // Position-only update (50% smaller payload)
-          channelRef.current.track({ 
-            x, 
-            y, 
-            t: Date.now() 
-          })
-        }
+      if (!channelRef.current) return
+
+      const now = Date.now()
+      const timeSinceBroadcast = now - lastBroadcastTime.current
+
+      // Calculate distance from last broadcast position
+      const dx = x - lastBroadcastPos.current.x
+      const dy = y - lastBroadcastPos.current.y
+      const distance = Math.sqrt(dx * dx + dy * dy)
+
+      // Skip if within dead zone and too soon
+      if (distance < DEAD_ZONE && timeSinceBroadcast < MIN_BROADCAST_INTERVAL) {
+        return
       }
+
+      // Only include metadata if it changed (reduces payload by 50%)
+      const currentMetadata = { name: myNameRef.current, color: myColorRef.current }
+      const metadataChanged =
+        lastMetadataBroadcastRef.current.name !== currentMetadata.name ||
+        lastMetadataBroadcastRef.current.color !== currentMetadata.color
+
+      if (metadataChanged) {
+        // Full update with metadata
+        channelRef.current.track({
+          x,
+          y,
+          name: currentMetadata.name,
+          color: currentMetadata.color,
+          t: now
+        })
+        lastMetadataBroadcastRef.current = currentMetadata
+      } else {
+        // Position-only update (50% smaller payload)
+        channelRef.current.track({
+          x,
+          y,
+          t: now
+        })
+      }
+
+      // Update tracking refs
+      lastBroadcastPos.current = { x, y }
+      lastBroadcastTime.current = now
     },
     updateSessionSettings,
     myId: myIdRef.current,

@@ -1,12 +1,13 @@
 import { create } from 'zustand'
 
-type ObjectRecord = { 
+export type ObjectRecord = {
   id: string
   type?: string
   x: number
   y: number
   width: number
   height: number
+  rotation?: number
   fill?: string
   text_content?: string
   updatedAt?: string
@@ -14,7 +15,7 @@ type ObjectRecord = {
 
 interface CanvasState {
   objects: Record<string, ObjectRecord>
-  upsertObject: (o: ObjectRecord) => void
+  upsertObject: (o: Partial<ObjectRecord> & { id: string }) => void
   upsertMany: (os: ObjectRecord[]) => void
   removeObject: (id: string) => void
 }
@@ -30,7 +31,7 @@ export const useCanvasState = create<CanvasState>((set) => ({
       if (incoming < current) return s
     }
     // Skip update if values haven't changed (prevents drag loops)
-    if (prev && prev.x === o.x && prev.y === o.y && prev.width === o.width && prev.height === o.height && prev.fill === o.fill) {
+    if (prev && prev.x === o.x && prev.y === o.y && prev.width === o.width && prev.height === o.height && prev.rotation === o.rotation && prev.fill === o.fill) {
       return s
     }
     return { objects: { ...s.objects, [o.id]: { ...prev, ...o } } }
@@ -51,6 +52,7 @@ export const useCanvasState = create<CanvasState>((set) => ({
         prev.y === o.y &&
         prev.width === o.width &&
         prev.height === o.height &&
+        prev.rotation === o.rotation &&
         prev.fill === o.fill &&
         prev.text_content === o.text_content &&
         prev.type === o.type
@@ -62,4 +64,21 @@ export const useCanvasState = create<CanvasState>((set) => ({
     return { objects: nextObjects }
   }),
   removeObject: (id) => set((s) => { const { [id]: _, ...rest } = s.objects; return { objects: rest } }),
+}))
+
+// Tool and UI state
+export type Tool = 'select' | 'pan' | 'rect' | 'circle' | 'text' | 'frame' | 'pen'
+
+interface ToolState {
+  activeTool: Tool
+  setActiveTool: (tool: Tool) => void
+  clipboard: ObjectRecord[]
+  setClipboard: (objects: ObjectRecord[]) => void
+}
+
+export const useToolState = create<ToolState>((set) => ({
+  activeTool: 'select',
+  setActiveTool: (tool) => set({ activeTool: tool }),
+  clipboard: [],
+  setClipboard: (objects) => set({ clipboard: objects }),
 }))

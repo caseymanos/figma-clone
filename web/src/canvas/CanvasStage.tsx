@@ -1,12 +1,14 @@
 import { Stage, Layer, Rect, Circle, Text, Transformer } from 'react-konva'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { useCanvasState } from './state'
+import { useCanvasState, useToolState } from './state'
 import { usePresenceChannel } from './usePresenceChannel'
 import { useSelection } from './selection'
 import { useKeyboardShortcuts } from './useKeyboardShortcuts'
 import { TextEditor } from '../components/TextEditor'
 import { BottomToolbar } from '../components/BottomToolbar'
+import { createSmoothedCursor, updateSmoothedCursor, animateCursor, stageToContent } from './cursorSmoothing'
+import type { SmoothedCursor } from './cursorSmoothing'
 import Konva from 'konva'
 
 function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
@@ -26,10 +28,6 @@ function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
       }, remaining)
     }
   } as T
-}
-
-function lerp(start: number, end: number, t: number): number {
-  return start + (end - start) * t
 }
 
 export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; selectedColor?: string }) {
@@ -52,18 +50,21 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   const selectedIds = useSelection((s) => s.selectedIds)
   const setSelectedIds = useSelection((s) => s.setSelectedIds)
   const toggleId = useSelection((s) => s.toggleId)
+  const activeTool = useToolState((s) => s.activeTool)
+  const setActiveTool = useToolState((s) => s.setActiveTool)
 
   const [fps, setFps] = useState(0)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
+  const [isDrawing, setIsDrawing] = useState(false)
+  const [newShape, setNewShape] = useState<{ startX: number; startY: number; type: 'rect' | 'circle' | 'text' } | null>(null)
 
   const pendingObjectsRef = useRef<Array<any>>([])
   const objectsRafRef = useRef<number | null>(null)
   
   // Cursor data store - ref-based, never triggers React renders
   const cursorsDataRef = useRef<Record<string, {
-    current: { x: number; y: number }
-    target: { x: number; y: number }
+    smoothed: SmoothedCursor
     name: string
     color: string
     group: Konva.Group | null
@@ -134,7 +135,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   }, [canvasId, upsertMany, removeObject])
 
   // CURSOR SYSTEM - Using shared presence hook
-  const handleCursorUpdate = useCallback((cursors: Record<string, { x: number; y: number; name: string; color: string }>) => {
+  const handleCursorUpdate = useCallback((cursors: Record<string, { x: number; y: number; name: string; color: string; t?: number }>) => {
     const cursorLayer = cursorLayerRef.current
     if (!cursorLayer) return
 
@@ -174,27 +175,30 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     Object.entries(cursors).forEach(([key, cursor]) => {
       seenIds.add(key)
       const cursorsData = cursorsDataRef.current
-      
+
       if (!cursorsData[key]) {
-        // Create new cursor
+        // Create new cursor with smoothing
         const group = createCursorGroup(
-          cursor.x, 
-          cursor.y, 
-          cursor.name, 
+          cursor.x,
+          cursor.y,
+          cursor.name,
           cursor.color
         )
         cursorLayer.add(group)
 
         cursorsData[key] = {
-          current: { x: cursor.x, y: cursor.y },
-          target: { x: cursor.x, y: cursor.y },
+          smoothed: createSmoothedCursor(cursor.x, cursor.y),
           name: cursor.name,
           color: cursor.color,
           group,
         }
       } else {
-        // Update target position for interpolation
-        cursorsData[key].target = { x: cursor.x, y: cursor.y }
+        // Update smoothed target position
+        updateSmoothedCursor(
+          cursorsData[key].smoothed,
+          { x: cursor.x, y: cursor.y },
+          cursor.t
+        )
 
         // Update label if name changed
         if (cursorsData[key].name !== cursor.name) {
@@ -224,14 +228,13 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     cursorLayer.batchDraw()
   }, [])
 
-  const { trackCursor } = usePresenceChannel({
+  // Get presence hook with trackCursor and myId
+  const { trackCursor, myId } = usePresenceChannel({
     canvasId,
     onCursorUpdate: handleCursorUpdate
   })
 
-  // (Removed transform-based reprojection to restore simpler behavior)
-
-  // Animation loop for smooth cursor interpolation (simple target lerp)
+  // Animation loop with exponential smoothing and prediction
   useEffect(() => {
     const anim = new Konva.Animation(() => {
       const cursorLayer = cursorLayerRef.current
@@ -240,38 +243,28 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       let needsRedraw = false
       const cursorsData = cursorsDataRef.current
 
-      Object.values(cursorsData).forEach(cursor => {
+      Object.entries(cursorsData).forEach(([id, cursor]) => {
         if (!cursor.group) return
 
-        const dx = cursor.target.x - cursor.current.x
-        const dy = cursor.target.y - cursor.current.y
-        const distance = Math.sqrt(dx * dx + dy * dy)
-
-        // AGGRESSIVE lerp factors for ultra-responsive feel
-        let lerpFactor = 0.6
-        if (distance > 100) {
-          lerpFactor = 0.85
-        } else if (distance > 50) {
-          lerpFactor = 0.75
-        } else if (distance > 20) {
-          lerpFactor = 0.7
+        // Hide local user's cursor to prevent disconnect
+        if (id === myId) {
+          cursor.group.opacity(0)
+          return
         }
 
-        const newX = lerp(cursor.current.x, cursor.target.x, lerpFactor)
-        const newY = lerp(cursor.current.y, cursor.target.y, lerpFactor)
-        if (Math.abs(newX - cursor.current.x) > 0.05 || Math.abs(newY - cursor.current.y) > 0.05) {
-          cursor.current.x = newX
-          cursor.current.y = newY
-        }
+        cursor.group.opacity(1)
+
+        // Animate with prediction
+        const pos = animateCursor(cursor.smoothed, true)
 
         const children = cursor.group.getChildren()
         const dot = children[0] as Konva.Circle
         const labelBg = children[1] as Konva.Rect
         const labelText = children[2] as Konva.Text
 
-        dot.position({ x: cursor.current.x, y: cursor.current.y })
-        labelBg.position({ x: cursor.current.x + 10, y: cursor.current.y - 26 })
-        labelText.position({ x: cursor.current.x + 16, y: cursor.current.y - 22 })
+        dot.position({ x: pos.x, y: pos.y })
+        labelBg.position({ x: pos.x + 10, y: pos.y - 26 })
+        labelText.position({ x: pos.x + 16, y: pos.y - 22 })
 
         needsRedraw = true
       })
@@ -287,44 +280,30 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       anim.stop()
       Object.values(cursorsDataRef.current).forEach(cursor => cursor.group?.destroy())
     }
-  }, [])
+  }, [myId])
 
-  // Broadcast cursor position on mouse move - adaptive 30/60fps stage-space
+  // Broadcast cursor position in CONTENT-SPACE coordinates
   useEffect(() => {
-    let lastPos = { x: 0, y: 0 }
-    const minDelta = 3
-    const baseTickMs = 33 // ~30fps
-    const burstTickMs = 16 // ~60fps during burst
-    const burstDurationMs = 150
-    const velocityThreshold = 300 // px/sec
-
-    let lastTick = 0
-    let lastTime = performance.now()
-    let burstUntil = 0
-
     const handleMove = () => {
-      const now = performance.now()
-      const tickMs = now < burstUntil ? burstTickMs : baseTickMs
-      if (now - lastTick < tickMs) return
-      lastTick = now
       if (document.hidden) return
 
-      const pos = stageRef.current?.getStage()?.getPointerPosition()
+      const stage = stageRef.current
+      if (!stage) return
+
+      const pos = stage.getPointerPosition()
       if (!pos) return
 
-      const dx = pos.x - lastPos.x
-      const dy = pos.y - lastPos.y
-      const dist = Math.hypot(dx, dy)
-      const dt = Math.max(1, now - lastTime)
-      const velocity = (dist * 1000) / dt
+      // Convert stage-space to content-space
+      const contentPos = stageToContent(
+        pos.x,
+        pos.y,
+        stage.x(),
+        stage.y(),
+        stage.scaleX()
+      )
 
-      if (dist < minDelta) return
-
-      if (velocity > velocityThreshold) burstUntil = now + burstDurationMs
-
-      lastPos = { x: pos.x, y: pos.y }
-      lastTime = now
-      trackCursor(pos.x, pos.y)
+      // trackCursor now has smart debouncing built-in
+      trackCursor(contentPos.x, contentPos.y)
     }
 
     const stage = stageRef.current?.getStage()
@@ -451,38 +430,36 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     }).eq('id', id).then()
   }, [upsertObject])
 
-  const addShape = async (type: 'rect' | 'circle' | 'text') => {
+  const createShapeAtPosition = async (type: 'rect' | 'circle' | 'text', x: number, y: number, width: number, height: number) => {
     let shapeData: any = {
       canvas_id: canvasId,
       type,
-      x: 100 + Math.random() * 200,
-      y: 100 + Math.random() * 200,
+      x,
+      y,
+      width: Math.max(Math.abs(width), 5),
+      height: Math.max(Math.abs(height), 5),
       fill: selectedColor || '#4f46e5'
     }
 
-    if (type === 'rect') {
-      shapeData = { ...shapeData, width: 120, height: 80 }
-    } else if (type === 'circle') {
-      shapeData = { ...shapeData, width: 80, height: 80 }
-    } else if (type === 'text') {
-      shapeData = { 
-        ...shapeData, 
-        text_content: 'Double-click to edit',
-        width: 200,
-        height: 40,
-        fill: '#000000'
-      }
+    if (type === 'text') {
+      shapeData.text_content = 'Text'
+      shapeData.fill = '#000000'
     }
 
-    const { error } = await supabase.from('objects').insert(shapeData)
+    const { data, error } = await supabase.from('objects').insert(shapeData).select()
     
     if (error) {
       console.error(`Failed to add ${type}:`, error)
-      alert(`Failed to add ${type}: ${error.message}`)
+    } else if (data && data[0]) {
+      // Select the newly created shape
+      setSelectedIds([data[0].id])
+      // Switch back to select tool
+      setActiveTool('select')
     }
   }
 
   const onShapeClick = (e: any) => {
+    if (activeTool !== 'select') return
     const shape = e.target
     const id = shape?.attrs?.id
     if (!id) return
@@ -495,6 +472,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   }
 
   const onShapeDoubleClick = (e: any) => {
+    if (activeTool !== 'select') return
     const shape = e.target
     const id = shape?.attrs?.id
     const obj = objects.find(o => o.id === id)
@@ -502,6 +480,85 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       setEditingTextId(id)
       setSelectedIds([]) // Clear selection while editing
     }
+  }
+
+  // Handle stage click for drawing shapes
+  const onStageMouseDown = (e: any) => {
+    // Only handle clicks on empty canvas (not on shapes)
+    if (e.target !== e.target.getStage() && e.target !== objectLayerRef.current) {
+      return
+    }
+
+    // Clear selection when clicking empty canvas in select mode
+    if (activeTool === 'select') {
+      setSelectedIds([])
+      return
+    }
+
+    // Start drawing shape if a shape tool is active
+    if (activeTool === 'rect' || activeTool === 'circle' || activeTool === 'text') {
+      const stage = stageRef.current
+      const pos = stage.getPointerPosition()
+      if (!pos) return
+
+      // Convert to content space
+      const contentPos = stageToContent(pos.x, pos.y, stage.x(), stage.y(), stage.scaleX())
+      
+      setIsDrawing(true)
+      setNewShape({ startX: contentPos.x, startY: contentPos.y, type: activeTool })
+    }
+  }
+
+  const onStageMouseMove = () => {
+    if (!isDrawing || !newShape) return
+    // Could be used for live preview in the future
+  }
+
+  const onStageMouseUp = async () => {
+    if (!isDrawing || !newShape) return
+
+    const stage = stageRef.current
+    const pos = stage.getPointerPosition()
+    if (!pos) return
+
+    const contentPos = stageToContent(pos.x, pos.y, stage.x(), stage.y(), stage.scaleX())
+    
+    const width = contentPos.x - newShape.startX
+    const height = contentPos.y - newShape.startY
+
+    // For circles, use the larger dimension
+    let finalWidth = Math.abs(width)
+    let finalHeight = Math.abs(height)
+    
+    if (newShape.type === 'circle') {
+      const size = Math.max(finalWidth, finalHeight)
+      finalWidth = size
+      finalHeight = size
+    }
+
+    // Minimum size threshold
+    if (finalWidth < 5 && finalHeight < 5) {
+      // If too small, create default sized shape
+      if (newShape.type === 'rect') {
+        finalWidth = 120
+        finalHeight = 80
+      } else if (newShape.type === 'circle') {
+        finalWidth = 80
+        finalHeight = 80
+      } else if (newShape.type === 'text') {
+        finalWidth = 200
+        finalHeight = 40
+      }
+    }
+
+    // Adjust position if drawn backwards
+    const x = width < 0 ? newShape.startX + width : newShape.startX
+    const y = height < 0 ? newShape.startY + height : newShape.startY
+
+    await createShapeAtPosition(newShape.type, x, y, finalWidth, finalHeight)
+
+    setIsDrawing(false)
+    setNewShape(null)
   }
 
   // Keyboard shortcuts callbacks
@@ -620,24 +677,41 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     upsertObject,
   })
 
+  // Update cursor style based on active tool
+  const getCursorStyle = () => {
+    switch (activeTool) {
+      case 'pan':
+        return 'grab'
+      case 'rect':
+      case 'circle':
+      case 'text':
+        return 'crosshair'
+      default:
+        return 'default'
+    }
+  }
+
   return (
-    <div style={{ height: '100%', width: '100%', position: 'relative' }}>
+    <div style={{ height: '100%', width: '100%', position: 'relative', cursor: getCursorStyle() }}>
       <Stage
         ref={stageRef}
         width={window.innerWidth}
         height={window.innerHeight}
-        draggable
+        draggable={activeTool === 'pan'}
         scaleX={scale}
         scaleY={scale}
         onWheel={onWheel}
         onDragEnd={onStageDragEnd}
+        onMouseDown={onStageMouseDown}
+        onMouseMove={onStageMouseMove}
+        onMouseUp={onStageMouseUp}
       >
         <Layer ref={objectLayerRef} onDragEnd={onLayerDragEnd}>
           {objects.map((o) => {
             const commonProps = {
               id: o.id,
               key: o.id,
-              draggable: true,
+              draggable: activeTool === 'select',
               onClick: onShapeClick,
               onDblClick: onShapeDoubleClick,
               rotation: o.rotation || 0,
@@ -735,7 +809,6 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
 
       {/* Bottom toolbar */}
       <BottomToolbar
-        onAddShape={addShape}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
       />
