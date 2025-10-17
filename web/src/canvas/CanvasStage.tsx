@@ -1,7 +1,8 @@
-import { Stage, Layer, Rect, Circle, Text, Transformer } from 'react-konva'
+import { Stage, Layer, Rect, Circle, Text, Transformer, Line } from 'react-konva'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useCanvasState, useToolState } from './state'
+import type { Tool } from './state'
 import { usePresenceChannel } from './usePresenceChannel'
 import { useSelection } from './selection'
 import { useKeyboardShortcuts } from './useKeyboardShortcuts'
@@ -57,11 +58,23 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
   const [isDrawing, setIsDrawing] = useState(false)
-  const [newShape, setNewShape] = useState<{ startX: number; startY: number; type: 'rect' | 'circle' | 'text' } | null>(null)
+  const [newShape, setNewShape] = useState<{ startX: number; startY: number; type: 'rect' | 'circle' | 'text' | 'frame' } | null>(null)
+  const [previewShape, setPreviewShape] = useState<{ x: number; y: number; width: number; height: number; type: 'rect' | 'circle' | 'text' | 'frame' } | null>(null)
+
+  // Pen tool state
+  const [penPoints, setPenPoints] = useState<Array<{ x: number; y: number }>>([])
+  const [isPenDrawing, setIsPenDrawing] = useState(false)
 
   const pendingObjectsRef = useRef<Array<any>>([])
   const objectsRafRef = useRef<number | null>(null)
-  
+
+  // Spacebar pan state
+  const [isSpacebarHeld, setIsSpacebarHeld] = useState(false)
+  const previousToolRef = useRef<Tool | null>(null)
+
+  // Multi-select drag tracking
+  const dragStartPositionsRef = useRef<Record<string, { x: number; y: number }>>({})
+
   // Cursor data store - ref-based, never triggers React renders
   const cursorsDataRef = useRef<Record<string, {
     smoothed: SmoothedCursor
@@ -89,7 +102,10 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
               height: r.height,
               rotation: r.rotation,
               fill: r.fill || '#4f46e5',
+              stroke: r.stroke,
+              stroke_width: r.stroke_width,
               text_content: r.text_content,
+              points: r.points,
               updatedAt: r.updated_at,
             })
             if (objectsRafRef.current == null) {
@@ -122,7 +138,10 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
           height: r.height,
           rotation: r.rotation,
           fill: r.fill || '#4f46e5',
+          stroke: r.stroke,
+          stroke_width: r.stroke_width,
           text_content: r.text_content,
+          points: r.points,
           updatedAt: r.updated_at,
         }))
         upsertMany(batch)
@@ -350,20 +369,36 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
 
   const onWheel = throttle((e: any) => {
     e.evt.preventDefault()
-    const scaleBy = 1.05
     const stage = stageRef.current
-    const oldScale = stage.scaleX()
-    const mousePointTo = {
-      x: (stage.getPointerPosition().x - stage.x()) / oldScale,
-      y: (stage.getPointerPosition().y - stage.y()) / oldScale,
+
+    // Check if Ctrl/Cmd key is held for zoom
+    if (e.evt.ctrlKey || e.evt.metaKey) {
+      // Zoom behavior - smoother with 1.02 scale factor
+      const scaleBy = 1.02
+      const oldScale = stage.scaleX()
+      const mousePointTo = {
+        x: (stage.getPointerPosition().x - stage.x()) / oldScale,
+        y: (stage.getPointerPosition().y - stage.y()) / oldScale,
+      }
+      const newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy
+      setScaleIfChanged(newScale)
+      const pointer = stage.getPointerPosition()
+      const newPos = { x: pointer.x - mousePointTo.x * newScale, y: pointer.y - mousePointTo.y * newScale }
+      stage.position(newPos)
+      setStagePos(newPos)
+    } else {
+      // Pan behavior - scroll vertically
+      const dx = e.evt.deltaX
+      const dy = e.evt.deltaY
+      const currentPos = stage.position()
+      const newPos = {
+        x: currentPos.x - dx,
+        y: currentPos.y - dy
+      }
+      stage.position(newPos)
+      setStagePos(newPos)
     }
-    const newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy
-    setScaleIfChanged(newScale)
-    const pointer = stage.getPointerPosition()
-    const newPos = { x: pointer.x - mousePointTo.x * newScale, y: pointer.y - mousePointTo.y * newScale }
-    stage.position(newPos)
-    setStagePos(newPos)
-  }, 16)
+  }, 8)
 
   const onStageDragEnd = () => {
     const stage = stageRef.current
@@ -371,6 +406,58 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       setStagePos({ x: stage.x(), y: stage.y() })
     }
   }
+
+  // Track initial positions of all selected shapes when drag starts
+  const onLayerDragStart = useCallback((e: any) => {
+    const shape = e.target
+    if (shape === objectLayerRef.current) return
+
+    const id = shape.attrs.id
+    if (!id || !selectedIds.includes(id)) return
+
+    // Store initial positions of all selected shapes
+    dragStartPositionsRef.current = {}
+    selectedIds.forEach(selectedId => {
+      const node = shapeRefsMap.current.get(selectedId)
+      if (node) {
+        dragStartPositionsRef.current[selectedId] = {
+          x: node.x(),
+          y: node.y()
+        }
+      }
+    })
+  }, [selectedIds])
+
+  // Move all selected shapes together during drag
+  const onLayerDragMove = useCallback((e: any) => {
+    const shape = e.target
+    if (shape === objectLayerRef.current) return
+
+    const id = shape.attrs.id
+    if (!id || !selectedIds.includes(id) || selectedIds.length <= 1) return
+
+    // Calculate delta from the dragged shape
+    const startPos = dragStartPositionsRef.current[id]
+    if (!startPos) return
+
+    const dx = shape.x() - startPos.x
+    const dy = shape.y() - startPos.y
+
+    // Move all other selected shapes by the same delta
+    selectedIds.forEach(selectedId => {
+      if (selectedId !== id) {
+        const node = shapeRefsMap.current.get(selectedId)
+        const initialPos = dragStartPositionsRef.current[selectedId]
+        if (node && initialPos) {
+          node.x(initialPos.x + dx)
+          node.y(initialPos.y + dy)
+        }
+      }
+    })
+
+    // Redraw the layer
+    objectLayerRef.current?.batchDraw()
+  }, [selectedIds])
 
   // Event delegation for object dragging
   const onLayerDragEnd = useCallback((e: any) => {
@@ -380,20 +467,52 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     const id = shape.attrs.id
     if (!id) return
 
-    const finalPos = { x: shape.x(), y: shape.y() }
+    // If multiple shapes are selected, update all of them
+    if (selectedIds.includes(id) && selectedIds.length > 1) {
+      const updates: Array<{ id: string; x: number; y: number }> = []
 
-    // Update local state immediately
-    upsertObject({
-      id,
-      x: finalPos.x,
-      y: finalPos.y,
-      width: shape.width(),
-      height: shape.height()
-    })
+      selectedIds.forEach(selectedId => {
+        const node = shapeRefsMap.current.get(selectedId)
+        if (node) {
+          const pos = { x: node.x(), y: node.y() }
 
-    // Broadcast to other users
-    supabase.from('objects').update({ x: finalPos.x, y: finalPos.y }).eq('id', id).then()
-  }, [upsertObject])
+          // Update local state
+          upsertObject({
+            id: selectedId,
+            x: pos.x,
+            y: pos.y,
+            width: node.width(),
+            height: node.height()
+          })
+
+          updates.push({ id: selectedId, x: pos.x, y: pos.y })
+        }
+      })
+
+      // Batch broadcast to other users
+      updates.forEach(update => {
+        supabase.from('objects').update({ x: update.x, y: update.y }).eq('id', update.id).then()
+      })
+    } else {
+      // Single shape drag
+      const finalPos = { x: shape.x(), y: shape.y() }
+
+      // Update local state immediately
+      upsertObject({
+        id,
+        x: finalPos.x,
+        y: finalPos.y,
+        width: shape.width(),
+        height: shape.height()
+      })
+
+      // Broadcast to other users
+      supabase.from('objects').update({ x: finalPos.x, y: finalPos.y }).eq('id', id).then()
+    }
+
+    // Clear drag start positions
+    dragStartPositionsRef.current = {}
+  }, [upsertObject, selectedIds])
 
   // Handle transform (resize/rotate) end
   const onTransformEnd = useCallback((e: any) => {
@@ -430,7 +549,50 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     }).eq('id', id).then()
   }, [upsertObject])
 
-  const createShapeAtPosition = async (type: 'rect' | 'circle' | 'text', x: number, y: number, width: number, height: number) => {
+  const finishPenPath = useCallback(async () => {
+    if (penPoints.length < 2) {
+      // Need at least 2 points to create a line
+      setPenPoints([])
+      setIsPenDrawing(false)
+      return
+    }
+
+    // Calculate bounding box for the path
+    const xs = penPoints.map(p => p.x)
+    const ys = penPoints.map(p => p.y)
+    const minX = Math.min(...xs)
+    const minY = Math.min(...ys)
+    const maxX = Math.max(...xs)
+    const maxY = Math.max(...ys)
+
+    const lineData = {
+      canvas_id: canvasId,
+      type: 'line',
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+      points: penPoints,
+      stroke: selectedColor || '#4f46e5',
+      stroke_width: 2,
+      fill: 'transparent',
+    }
+
+    const { data, error } = await supabase.from('objects').insert(lineData).select()
+
+    if (error) {
+      console.error('Failed to add line:', error)
+    } else if (data && data[0]) {
+      setSelectedIds([data[0].id])
+    }
+
+    // Reset pen state
+    setPenPoints([])
+    setIsPenDrawing(false)
+    setActiveTool('select')
+  }, [penPoints, canvasId, selectedColor, setSelectedIds, setActiveTool])
+
+  const createShapeAtPosition = async (type: 'rect' | 'circle' | 'text' | 'frame', x: number, y: number, width: number, height: number) => {
     let shapeData: any = {
       canvas_id: canvasId,
       type,
@@ -444,10 +606,15 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     if (type === 'text') {
       shapeData.text_content = 'Text'
       shapeData.fill = '#000000'
+    } else if (type === 'frame') {
+      // Frame: border only, no fill
+      shapeData.fill = 'transparent'
+      shapeData.stroke = selectedColor || '#8b5cf6'
+      shapeData.stroke_width = 2
     }
 
     const { data, error } = await supabase.from('objects').insert(shapeData).select()
-    
+
     if (error) {
       console.error(`Failed to add ${type}:`, error)
     } else if (data && data[0]) {
@@ -495,15 +662,29 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       return
     }
 
-    // Start drawing shape if a shape tool is active
-    if (activeTool === 'rect' || activeTool === 'circle' || activeTool === 'text') {
+    // Pen tool: add points on click
+    if (activeTool === 'pen') {
       const stage = stageRef.current
       const pos = stage.getPointerPosition()
       if (!pos) return
 
       // Convert to content space
       const contentPos = stageToContent(pos.x, pos.y, stage.x(), stage.y(), stage.scaleX())
-      
+
+      setPenPoints(prev => [...prev, contentPos])
+      setIsPenDrawing(true)
+      return
+    }
+
+    // Start drawing shape if a shape tool is active
+    if (activeTool === 'rect' || activeTool === 'circle' || activeTool === 'text' || activeTool === 'frame') {
+      const stage = stageRef.current
+      const pos = stage.getPointerPosition()
+      if (!pos) return
+
+      // Convert to content space
+      const contentPos = stageToContent(pos.x, pos.y, stage.x(), stage.y(), stage.scaleX())
+
       setIsDrawing(true)
       setNewShape({ startX: contentPos.x, startY: contentPos.y, type: activeTool })
     }
@@ -511,7 +692,35 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
 
   const onStageMouseMove = () => {
     if (!isDrawing || !newShape) return
-    // Could be used for live preview in the future
+
+    const stage = stageRef.current
+    const pos = stage?.getPointerPosition()
+    if (!pos) return
+
+    // Convert to content space
+    const contentPos = stageToContent(pos.x, pos.y, stage.x(), stage.y(), stage.scaleX())
+
+    let width = contentPos.x - newShape.startX
+    let height = contentPos.y - newShape.startY
+
+    // For circles, use the larger dimension
+    if (newShape.type === 'circle') {
+      const size = Math.max(Math.abs(width), Math.abs(height))
+      width = width < 0 ? -size : size
+      height = height < 0 ? -size : size
+    }
+
+    // Calculate actual position (adjust if drawn backwards)
+    const x = width < 0 ? newShape.startX + width : newShape.startX
+    const y = height < 0 ? newShape.startY + height : newShape.startY
+
+    setPreviewShape({
+      x,
+      y,
+      width: Math.abs(width),
+      height: Math.abs(height),
+      type: newShape.type
+    })
   }
 
   const onStageMouseUp = async () => {
@@ -548,6 +757,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       } else if (newShape.type === 'text') {
         finalWidth = 200
         finalHeight = 40
+      } else if (newShape.type === 'frame') {
+        finalWidth = 300
+        finalHeight = 200
       }
     }
 
@@ -559,6 +771,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
 
     setIsDrawing(false)
     setNewShape(null)
+    setPreviewShape(null)
   }
 
   // Keyboard shortcuts callbacks
@@ -677,14 +890,72 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     upsertObject,
   })
 
+  // Pen tool: finish path on Escape or Enter
+  useEffect(() => {
+    if (!isPenDrawing) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        e.preventDefault()
+        finishPenPath()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isPenDrawing, finishPenPath])
+
+  // Spacebar pan functionality
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if typing in text editor or input field
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || editingTextId) {
+        return
+      }
+
+      // Spacebar to temporarily enable pan
+      if (e.code === 'Space' && !isSpacebarHeld && !isDrawing) {
+        e.preventDefault()
+        setIsSpacebarHeld(true)
+        previousToolRef.current = activeTool
+      }
+    }
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && isSpacebarHeld) {
+        e.preventDefault()
+        setIsSpacebarHeld(false)
+        // Restore previous tool
+        if (previousToolRef.current) {
+          setActiveTool(previousToolRef.current)
+          previousToolRef.current = null
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [isSpacebarHeld, activeTool, setActiveTool, editingTextId, isDrawing])
+
   // Update cursor style based on active tool
   const getCursorStyle = () => {
+    if (isSpacebarHeld) return 'grab'
+
     switch (activeTool) {
       case 'pan':
         return 'grab'
       case 'rect':
       case 'circle':
       case 'text':
+      case 'frame':
+      case 'pen':
         return 'crosshair'
       default:
         return 'default'
@@ -697,7 +968,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         ref={stageRef}
         width={window.innerWidth}
         height={window.innerHeight}
-        draggable={activeTool === 'pan'}
+        draggable={activeTool === 'pan' || isSpacebarHeld}
         scaleX={scale}
         scaleY={scale}
         onWheel={onWheel}
@@ -706,7 +977,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         onMouseMove={onStageMouseMove}
         onMouseUp={onStageMouseUp}
       >
-        <Layer ref={objectLayerRef} onDragEnd={onLayerDragEnd}>
+        <Layer ref={objectLayerRef} onDragStart={onLayerDragStart} onDragMove={onLayerDragMove} onDragEnd={onLayerDragEnd}>
           {objects.map((o) => {
             const commonProps = {
               id: o.id,
@@ -752,6 +1023,33 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
                   strokeWidth={isSelected ? 2 : 0}
                 />
               )
+            } else if (o.type === 'frame') {
+              const isSelected = selectedIds.includes(o.id)
+              return (
+                <Rect
+                  {...commonProps}
+                  x={o.x}
+                  y={o.y}
+                  width={o.width}
+                  height={o.height}
+                  fill="transparent"
+                  stroke={isSelected ? '#10b981' : (o.stroke || '#8b5cf6')}
+                  strokeWidth={isSelected ? 3 : (o.stroke_width || 2)}
+                />
+              )
+            } else if (o.type === 'line' && o.points) {
+              const isSelected = selectedIds.includes(o.id)
+              return (
+                <Line
+                  {...commonProps}
+                  points={o.points.flatMap(p => [p.x, p.y])}
+                  stroke={isSelected ? '#10b981' : (o.stroke || '#4f46e5')}
+                  strokeWidth={isSelected ? 3 : (o.stroke_width || 2)}
+                  lineCap="round"
+                  lineJoin="round"
+                  fill={undefined}
+                />
+              )
             } else {
               const isSelected = selectedIds.includes(o.id)
               return (
@@ -768,6 +1066,92 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
               )
             }
           })}
+
+          {/* Pen tool preview - show path being drawn */}
+          {isPenDrawing && penPoints.length > 0 && (
+            <>
+              {/* Draw the line connecting points */}
+              {penPoints.length > 1 && (
+                <Line
+                  points={penPoints.flatMap(p => [p.x, p.y])}
+                  stroke={selectedColor || '#4f46e5'}
+                  strokeWidth={2}
+                  lineCap="round"
+                  lineJoin="round"
+                  listening={false}
+                />
+              )}
+              {/* Draw circles at each point */}
+              {penPoints.map((point, i) => (
+                <Circle
+                  key={i}
+                  x={point.x}
+                  y={point.y}
+                  radius={4}
+                  fill={selectedColor || '#4f46e5'}
+                  listening={false}
+                />
+              ))}
+            </>
+          )}
+
+          {/* Preview shape during creation */}
+          {previewShape && (() => {
+            const commonPreviewProps = {
+              listening: false,
+              opacity: 0.5,
+              stroke: selectedColor || '#4f46e5',
+              strokeWidth: 2,
+              dash: [5, 5],
+              fill: selectedColor || '#4f46e5',
+            }
+
+            if (previewShape.type === 'circle') {
+              return (
+                <Circle
+                  {...commonPreviewProps}
+                  x={previewShape.x + previewShape.width / 2}
+                  y={previewShape.y + previewShape.height / 2}
+                  radius={previewShape.width / 2}
+                />
+              )
+            } else if (previewShape.type === 'text') {
+              return (
+                <Rect
+                  {...commonPreviewProps}
+                  x={previewShape.x}
+                  y={previewShape.y}
+                  width={previewShape.width}
+                  height={previewShape.height}
+                  fill="transparent"
+                />
+              )
+            } else if (previewShape.type === 'frame') {
+              return (
+                <Rect
+                  {...commonPreviewProps}
+                  x={previewShape.x}
+                  y={previewShape.y}
+                  width={previewShape.width}
+                  height={previewShape.height}
+                  fill="transparent"
+                  stroke={selectedColor || '#8b5cf6'}
+                  strokeWidth={2}
+                />
+              )
+            } else {
+              return (
+                <Rect
+                  {...commonPreviewProps}
+                  x={previewShape.x}
+                  y={previewShape.y}
+                  width={previewShape.width}
+                  height={previewShape.height}
+                />
+              )
+            }
+          })()}
+
           <Transformer
             ref={transformerRef}
             boundBoxFunc={(oldBox, newBox) => {

@@ -9,7 +9,10 @@ export type ObjectRecord = {
   height: number
   rotation?: number
   fill?: string
+  stroke?: string
+  stroke_width?: number
   text_content?: string
+  points?: Array<{ x: number; y: number }> // For line/pen tool
   updatedAt?: string
 }
 
@@ -31,7 +34,7 @@ export const useCanvasState = create<CanvasState>((set) => ({
       if (incoming < current) return s
     }
     // Skip update if values haven't changed (prevents drag loops)
-    if (prev && prev.x === o.x && prev.y === o.y && prev.width === o.width && prev.height === o.height && prev.rotation === o.rotation && prev.fill === o.fill) {
+    if (prev && prev.x === o.x && prev.y === o.y && prev.width === o.width && prev.height === o.height && prev.rotation === o.rotation && prev.fill === o.fill && prev.stroke === o.stroke && prev.stroke_width === o.stroke_width) {
       return s
     }
     return { objects: { ...s.objects, [o.id]: { ...prev, ...o } } }
@@ -54,8 +57,11 @@ export const useCanvasState = create<CanvasState>((set) => ({
         prev.height === o.height &&
         prev.rotation === o.rotation &&
         prev.fill === o.fill &&
+        prev.stroke === o.stroke &&
+        prev.stroke_width === o.stroke_width &&
         prev.text_content === o.text_content &&
-        prev.type === o.type
+        prev.type === o.type &&
+        JSON.stringify(prev.points) === JSON.stringify(o.points)
       ) {
         continue
       }
