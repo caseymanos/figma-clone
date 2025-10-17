@@ -3,10 +3,7 @@ import OpenAI from 'openai'
 export const runtime = 'edge'
 export const maxDuration = 30 // 30 second timeout
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+// Note: OpenAI client is created inside the handler so we can detect env at runtime
 
 // Tool definitions for OpenAI function calling
 // These will be executed client-side
@@ -176,9 +173,27 @@ When users ask to create shapes, use reasonable default sizes and positions unle
 When users refer to "these" or "selected shapes", use layout tools that operate on the selection.
 For complex requests like "login form", use the specialized pattern tools.`
 
+    // Detect credentials: prefer AI Gateway, fallback to direct OpenAI
+    const gatewayKey = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN
+    const openaiKey = process.env.OPENAI_API_KEY
+
+    const apiKey = gatewayKey || openaiKey
+    if (!apiKey) {
+      console.error('AI Canvas API Error: Missing AI credentials (AI_GATEWAY_API_KEY/VERCEL_OIDC_TOKEN or OPENAI_API_KEY)')
+      return new Response(
+        JSON.stringify({ error: 'Missing AI credentials. Configure Vercel AI Gateway or set OPENAI_API_KEY.' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+
+    const client = new OpenAI({
+      apiKey,
+      ...(gatewayKey ? { baseURL: 'https://ai-gateway.vercel.sh/v1' } : {}),
+    })
+
     // Use OpenAI streaming with tool_choice='required' to force tool usage
-    const stream = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+    const stream = await client.chat.completions.create({
+      model: gatewayKey ? 'openai/gpt-4o-mini' : 'gpt-4o-mini',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt },
