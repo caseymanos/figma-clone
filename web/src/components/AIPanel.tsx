@@ -3,6 +3,8 @@ import type { CSSProperties } from 'react'
 import { runAgent } from '../ai/agent'
 import { useSelection } from '../canvas/selection'
 import { useUIState } from '../canvas/uiState'
+import { useDraggable } from '../canvas/useDraggable'
+import { getSnapPositionStyle, getSnapPreviewStyle } from '../canvas/snapPositions'
 
 export function AIPanel({ canvasId, selectedColorName }: { canvasId: string; selectedColorName?: string }) {
   const [prompt, setPrompt] = useState('')
@@ -11,7 +13,14 @@ export function AIPanel({ canvasId, selectedColorName }: { canvasId: string; sel
   const selectedIds = useSelection((s) => s.selectedIds)
 
   const minimized = useUIState((s) => s.aiPanelMinimized)
+  const position = useUIState((s) => s.aiPanelPosition)
   const setMinimized = useUIState((s) => s.setAIPanelMinimized)
+  const setPosition = useUIState((s) => s.setAIPanelPosition)
+
+  const { isDragging, onMouseDown, dragStyle, previewPosition } = useDraggable({
+    currentPosition: position,
+    onPositionChange: setPosition,
+  })
 
   const onSubmit = async (e: any) => {
     e.preventDefault()
@@ -33,17 +42,24 @@ export function AIPanel({ canvasId, selectedColorName }: { canvasId: string; sel
     }
   }
 
+  const positionStyle = getSnapPositionStyle(position)
+
   const panelStyle: CSSProperties = {
+    ...positionStyle,
+    position: 'fixed',
+    width: 340,
+    maxWidth: 'calc(100vw - 32px)',
     background: 'white',
     border: '2px solid #4f46e5',
-    borderRadius: minimized ? 8 : '12px 12px 0 0',
+    borderRadius: 8,
     boxShadow: '0 10px 40px rgba(79, 70, 229, 0.15)',
     padding: minimized ? 8 : 12,
     display: 'flex',
     flexDirection: 'column',
     gap: minimized ? 0 : 8,
     zIndex: 200,
-    transition: 'all 0.2s ease',
+    transition: isDragging ? 'none' : 'all 0.2s ease',
+    ...dragStyle,
   }
 
   const minimizeButtonStyle: CSSProperties = {
@@ -59,35 +75,50 @@ export function AIPanel({ canvasId, selectedColorName }: { canvasId: string; sel
 
   if (minimized) {
     return (
-      <div style={panelStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 16 }}>🤖</span>
-          <h3 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: '#4f46e5' }}>AI Assistant</h3>
-          <button
-            onClick={() => setMinimized(false)}
-            style={minimizeButtonStyle}
-            title="Maximize"
+      <>
+        <div style={panelStyle} onMouseDown={onMouseDown}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: isDragging ? 'grabbing' : 'grab',
+            }}
+            onClick={() => !isDragging && setMinimized(false)}
           >
-            ▲
-          </button>
+            <span style={{ fontSize: 16 }}>🤖</span>
+            <h3 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: '#4f46e5' }}>AI Assistant</h3>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setMinimized(false)
+              }}
+              style={minimizeButtonStyle}
+              title="Maximize"
+            >
+              ▲
+            </button>
+          </div>
         </div>
-      </div>
+        {previewPosition && <div style={getSnapPreviewStyle(previewPosition)} />}
+      </>
     )
   }
 
   return (
-    <div style={panelStyle}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 16 }}>🤖</span>
-        <h3 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: '#4f46e5' }}>AI Canvas Assistant</h3>
-        <button
-          onClick={() => setMinimized(true)}
-          style={minimizeButtonStyle}
-          title="Minimize"
-        >
-          ▼
-        </button>
-      </div>
+    <>
+      <div style={panelStyle} onMouseDown={onMouseDown}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <span style={{ fontSize: 16 }}>🤖</span>
+          <h3 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: '#4f46e5' }}>AI Canvas Assistant</h3>
+          <button
+            onClick={() => setMinimized(true)}
+            style={minimizeButtonStyle}
+            title="Minimize"
+          >
+            ▼
+          </button>
+        </div>
 
       {selectedColorName && (
         <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, padding: '4px 8px', background: '#f3f4f6', borderRadius: 4 }}>
@@ -140,7 +171,9 @@ export function AIPanel({ canvasId, selectedColorName }: { canvasId: string; sel
           ))}
         </div>
       )}
-    </div>
+      </div>
+      {previewPosition && <div style={getSnapPreviewStyle(previewPosition)} />}
+    </>
   )
 }
 

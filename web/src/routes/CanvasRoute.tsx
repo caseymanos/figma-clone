@@ -202,23 +202,13 @@ export default function CanvasRoute() {
               {canvasId ? <CanvasStage canvasId={canvasId} selectedColor={selectedColorHex} /> : null}
               {canvasId ? <PresenceSidebar /> : null}
               {canvasId && showAI ? (
-                <div style={{
-                  position: 'fixed',
-                  bottom: 16,
-                  left: 16,
-                  width: 340,
-                  maxWidth: 'calc(100vw - 32px)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 0,
-                  transition: 'all 0.2s ease'
-                }}>
+                <>
                   <AIPanel canvasId={canvasId} selectedColorName={selectedColorName} />
                   <ColorPalette
                     selectedColor={selectedColorHex}
                     onColorSelect={handleColorSelect}
                   />
-                </div>
+                </>
               ) : null}
             </div>
         {showProfileSettings && (

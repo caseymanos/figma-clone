@@ -4,6 +4,9 @@ import { Icon } from './icons/Icon'
 import { colors, typography, spacing, borderRadius, components, transitions, shadows, zIndex } from '../styles/design-tokens'
 import { useToolState } from '../canvas/state'
 import type { Tool } from '../canvas/state'
+import { useUIState } from '../canvas/uiState'
+import { useDraggable } from '../canvas/useDraggable'
+import { getSnapPositionStyle, getSnapPreviewStyle } from '../canvas/snapPositions'
 
 interface BottomToolbarProps {
   onZoomIn?: () => void
@@ -12,11 +15,19 @@ interface BottomToolbarProps {
 
 export function BottomToolbar({ onZoomIn, onZoomOut }: BottomToolbarProps) {
   const { activeTool, setActiveTool } = useToolState()
+  const position = useUIState((s) => s.toolbarPosition)
+  const setPosition = useUIState((s) => s.setToolbarPosition)
+
+  const { isDragging, onMouseDown, dragStyle, previewPosition } = useDraggable({
+    currentPosition: position,
+    onPositionChange: setPosition,
+  })
+
+  const positionStyle = getSnapPositionStyle(position)
+
   const toolbarStyle: CSSProperties = {
+    ...positionStyle,
     position: 'fixed',
-    bottom: spacing[4],
-    left: '50%',
-    transform: 'translateX(-50%)',
     height: components.toolbar.height,
     padding: components.toolbar.padding,
     display: 'flex',
@@ -27,6 +38,8 @@ export function BottomToolbar({ onZoomIn, onZoomOut }: BottomToolbarProps) {
     boxShadow: shadows.toolbar,
     zIndex: zIndex.toolbar,
     border: `1px solid ${colors.gray[700]}`,
+    transition: isDragging ? 'none' : transitions.colors,
+    ...dragStyle,
   }
 
   const toolButtonStyle: CSSProperties = {
@@ -124,25 +137,28 @@ export function BottomToolbar({ onZoomIn, onZoomOut }: BottomToolbarProps) {
   }
 
   return (
-    <div style={toolbarStyle}>
-      {/* Selection tools */}
-      {createToolButton('cursor', 'Move', () => handleToolClick('select'), 'V', 'select')}
-      {createToolButton('hand', 'Pan', () => handleToolClick('pan'), 'H', 'pan')}
+    <>
+      <div style={toolbarStyle} onMouseDown={onMouseDown}>
+        {/* Selection tools */}
+        {createToolButton('cursor', 'Move', () => handleToolClick('select'), 'V', 'select')}
+        {createToolButton('hand', 'Pan', () => handleToolClick('pan'), 'H', 'pan')}
 
-      <div style={dividerStyle} />
+        <div style={dividerStyle} />
 
-      {/* Shape tools */}
-      {createToolButton('rectangle', 'Rectangle', () => handleToolClick('rect'), 'R', 'rect')}
-      {createToolButton('circle', 'Circle', () => handleToolClick('circle'), 'O', 'circle')}
-      {createToolButton('text', 'Text', () => handleToolClick('text'), 'T', 'text')}
-      {createToolButton('frame', 'Frame', () => handleToolClick('frame'), 'F', 'frame')}
-      {createToolButton('pen', 'Pen', () => handleToolClick('pen'), 'P', 'pen')}
+        {/* Shape tools */}
+        {createToolButton('rectangle', 'Rectangle', () => handleToolClick('rect'), 'R', 'rect')}
+        {createToolButton('circle', 'Circle', () => handleToolClick('circle'), 'O', 'circle')}
+        {createToolButton('text', 'Text', () => handleToolClick('text'), 'T', 'text')}
+        {createToolButton('frame', 'Frame', () => handleToolClick('frame'), 'F', 'frame')}
+        {createToolButton('pen', 'Pen', () => handleToolClick('pen'), 'P', 'pen')}
 
-      <div style={dividerStyle} />
+        <div style={dividerStyle} />
 
-      {/* View tools */}
-      {createToolButton('zoomIn', 'Zoom In', () => onZoomIn?.(), '+')}
-      {createToolButton('zoomOut', 'Zoom Out', () => onZoomOut?.(), '-')}
-    </div>
+        {/* View tools */}
+        {createToolButton('zoomIn', 'Zoom In', () => onZoomIn?.(), '+')}
+        {createToolButton('zoomOut', 'Zoom Out', () => onZoomOut?.(), '-')}
+      </div>
+      {previewPosition && <div style={getSnapPreviewStyle(previewPosition)} />}
+    </>
   )
 }

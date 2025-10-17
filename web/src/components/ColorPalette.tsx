@@ -1,5 +1,7 @@
 import type { CSSProperties } from 'react'
 import { useUIState } from '../canvas/uiState'
+import { useDraggable } from '../canvas/useDraggable'
+import { getSnapPositionStyle, getSnapPreviewStyle } from '../canvas/snapPositions'
 
 const CORE_COLORS = {
   indigo: '#4f46e5',
@@ -46,19 +48,35 @@ export function ColorPalette({ selectedColor, onColorSelect }: ColorPaletteProps
   const showAll = useUIState((s) => s.colorPaletteShowAll)
   const strokeWidth = useUIState((s) => s.strokeWidth)
   const opacity = useUIState((s) => s.opacity)
+  const position = useUIState((s) => s.colorPalettePosition)
   const setCollapsed = useUIState((s) => s.setColorPaletteCollapsed)
   const setShowAll = useUIState((s) => s.setColorPaletteShowAll)
   const setStrokeWidth = useUIState((s) => s.setStrokeWidth)
   const setOpacity = useUIState((s) => s.setOpacity)
+  const setPosition = useUIState((s) => s.setColorPalettePosition)
+
+  const { isDragging, onMouseDown, dragStyle, previewPosition } = useDraggable({
+    currentPosition: position,
+    onPositionChange: setPosition,
+  })
 
   const colorsToShow = showAll ? { ...CORE_COLORS, ...EXTENDED_COLORS } : CORE_COLORS
 
+  const positionStyle = getSnapPositionStyle(position)
+
   const containerStyle: CSSProperties = {
+    ...positionStyle,
+    position: 'fixed',
+    width: 340,
+    maxWidth: 'calc(100vw - 32px)',
     padding: collapsed ? 8 : 10,
-    borderTop: '1px solid #e5e7eb',
+    border: '1px solid #e5e7eb',
     background: 'white',
-    borderRadius: '8px 8px 0 0',
-    transition: 'all 0.2s ease',
+    borderRadius: 8,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+    zIndex: 300,
+    transition: isDragging ? 'none' : 'all 0.2s ease',
+    ...dragStyle,
   }
 
   const headerStyle: CSSProperties = {
@@ -170,38 +188,51 @@ export function ColorPalette({ selectedColor, onColorSelect }: ColorPaletteProps
 
   if (collapsed) {
     return (
-      <div style={containerStyle}>
-        <div style={headerStyle}>
-          <div style={{ ...headingStyle, flexDirection: 'row', gap: 8 }}>
-            <div style={{ ...swatchStyle(selectedColor), width: 16, height: 16 }} />
-            <span>Colors & Options</span>
-          </div>
-          <button
-            onClick={() => setCollapsed(false)}
-            style={toggleButtonStyle}
-            title="Expand"
+      <>
+        <div style={containerStyle} onMouseDown={onMouseDown}>
+          <div
+            style={{
+              ...headerStyle,
+              cursor: isDragging ? 'grabbing' : 'grab',
+            }}
+            onClick={() => !isDragging && setCollapsed(false)}
           >
-            ▲
-          </button>
+            <div style={{ ...headingStyle, flexDirection: 'row', gap: 8 }}>
+              <div style={{ ...swatchStyle(selectedColor), width: 16, height: 16 }} />
+              <span>Colors & Options</span>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setCollapsed(false)
+              }}
+              style={toggleButtonStyle}
+              title="Expand"
+            >
+              ▲
+            </button>
+          </div>
         </div>
-      </div>
+        {previewPosition && <div style={getSnapPreviewStyle(previewPosition)} />}
+      </>
     )
   }
 
   return (
-    <div style={containerStyle}>
-      <div style={headerStyle}>
-        <h3 style={headingStyle}>
-          🎨 Colors & Options
-        </h3>
-        <button
-          onClick={() => setCollapsed(true)}
-          style={toggleButtonStyle}
-          title="Collapse"
-        >
-          ▼
-        </button>
-      </div>
+    <>
+      <div style={containerStyle} onMouseDown={onMouseDown}>
+        <div style={headerStyle}>
+          <h3 style={headingStyle}>
+            🎨 Colors & Options
+          </h3>
+          <button
+            onClick={() => setCollapsed(true)}
+            style={toggleButtonStyle}
+            title="Collapse"
+          >
+            ▼
+          </button>
+        </div>
 
       {/* Color Grid */}
       <div style={gridStyle}>
@@ -293,6 +324,8 @@ export function ColorPalette({ selectedColor, onColorSelect }: ColorPaletteProps
           {opacity}%
         </span>
       </div>
-    </div>
+      </div>
+      {previewPosition && <div style={getSnapPreviewStyle(previewPosition)} />}
+    </>
   )
 }
