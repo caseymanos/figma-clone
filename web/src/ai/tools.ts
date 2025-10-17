@@ -49,6 +49,7 @@ function normalizeInput(input: CanvasObjectInput): CanvasObjectInput {
 
 export interface AITools {
   createShape(input: CanvasObjectInput, canvasId: CanvasId): Promise<ShapeId>
+  createShapes(inputs: CanvasObjectInput[], canvasId: CanvasId): Promise<ShapeId[]>
   moveShape(id: ShapeId, x: number, y: number): Promise<void>
   resizeShape(id: ShapeId, width: number, height: number): Promise<void>
   rotateShape(id: ShapeId, degrees: number): Promise<void>
@@ -85,6 +86,42 @@ export const aiTools: AITools = {
     globalIdempotencyCache.remember(opKey)
     trackAIEvent('tool.createShape', { type: normalized.type })
     return data?.id as ShapeId
+  },
+
+  async createShapes(inputs, canvasId) {
+    if (!inputs.length) return []
+
+    // Normalize all inputs and build rows
+    const rows: any[] = []
+    const normalizedInputs = inputs.map(input => normalizeInput(input))
+
+    for (const normalized of normalizedInputs) {
+      const opKey = buildOperationKey({ op: 'create', canvasId, ...normalized })
+      if (globalIdempotencyCache.isDuplicate(opKey)) continue
+
+      const row: any = {
+        canvas_id: canvasId,
+        type: normalized.type,
+        x: normalized.x,
+        y: normalized.y,
+        width: normalized.width,
+        height: normalized.height,
+        rotation: normalized.rotation,
+        fill: normalized.fill,
+      }
+      if (normalized.type === 'text' && normalized.text) row.text_content = normalized.text
+      rows.push(row)
+      globalIdempotencyCache.remember(opKey)
+    }
+
+    if (!rows.length) return []
+
+    // Batch insert all shapes in single query
+    const { data, error } = await supabase.from('objects').insert(rows).select('id')
+    if (error) throw error
+
+    trackAIEvent('tool.createShapes', { count: rows.length })
+    return (data || []).map(r => r.id as ShapeId)
   },
 
   async moveShape(id, x, y) {

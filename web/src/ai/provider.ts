@@ -58,6 +58,7 @@ function normalizeColor(color?: string): string | undefined {
 
 export type ParsedIntent =
   | { kind: 'create'; type: 'rect' | 'circle' | 'text'; x?: number; y?: number; width?: number; height?: number; color?: string; text?: string }
+  | { kind: 'create-batch'; shapes: Array<{ type: 'rect' | 'circle' | 'text'; x?: number; y?: number; width?: number; height?: number; color?: string; text?: string }> }
   | { kind: 'move'; id: string; x: number; y: number }
   | { kind: 'resize'; id: string; width: number; height: number }
   | { kind: 'rotate'; id: string; degrees: number }
@@ -151,6 +152,21 @@ export const provider: Provider = {
               height: args.height,
               color: normalizeColor(args.color),
               text: args.text,
+            })
+            break
+
+          case 'createShapes':
+            intents.push({
+              kind: 'create-batch',
+              shapes: (args.shapes || []).map((shape: any) => ({
+                type: shape.type,
+                x: shape.x,
+                y: shape.y,
+                width: shape.width,
+                height: shape.height,
+                color: normalizeColor(shape.color),
+                text: shape.text,
+              })),
             })
             break
 

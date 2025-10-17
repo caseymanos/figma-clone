@@ -52,6 +52,22 @@ export async function runAgent(prompt: string, options: AgentRunOptions): Promis
         s.status = 'success'
         break
       }
+      case 'create-batch': {
+        const count = intent.shapes.length
+        const s = push(`Creating ${count} shape${count !== 1 ? 's' : ''}`)
+        const inputs = intent.shapes.map(shape => ({
+          type: shape.type,
+          x: shape.x ?? 100,
+          y: shape.y ?? 100,
+          width: shape.width,
+          height: shape.height,
+          fill: shape.color,
+          text: shape.text,
+        }))
+        await aiTools.createShapes(inputs, options.canvasId)
+        s.status = 'success'
+        break
+      }
       case 'move': {
         const s = push('Moving shape')
         await aiTools.moveShape(intent.id, intent.x, intent.y)

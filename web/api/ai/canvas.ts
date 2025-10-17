@@ -54,7 +54,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'createShape',
-      description: 'Create a new shape with specified color and position on the canvas',
+      description: 'Create a single shape with specified color and position on the canvas. For creating multiple shapes, use createShapes instead.',
       parameters: {
         type: 'object',
         properties: {
@@ -74,6 +74,43 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           text: { type: 'string', description: 'Text content when type is text' },
         },
         required: ['type', 'x', 'y'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'createShapes',
+      description: 'Create multiple shapes in a single batch operation. Use this instead of calling createShape multiple times for better performance.',
+      parameters: {
+        type: 'object',
+        properties: {
+          shapes: {
+            type: 'array',
+            description: 'Array of shapes to create',
+            items: {
+              type: 'object',
+              properties: {
+                type: {
+                  type: 'string',
+                  enum: ['rect', 'circle', 'text'],
+                  description: 'The type of shape to create',
+                },
+                color: {
+                  type: 'string',
+                  description: 'Color name from palette or hex code',
+                },
+                x: { type: 'number', description: 'X coordinate position (0-2000)' },
+                y: { type: 'number', description: 'Y coordinate position (0-2000)' },
+                width: { type: 'number', description: 'Width in pixels' },
+                height: { type: 'number', description: 'Height in pixels' },
+                text: { type: 'string', description: 'Text content when type is text' },
+              },
+              required: ['type', 'x', 'y'],
+            },
+          },
+        },
+        required: ['shapes'],
       },
     },
   },
@@ -270,9 +307,10 @@ export async function POST(request: Request): Promise<Response> {
     // Build context for the LLM
     const systemPrompt = `You are a canvas design assistant. You MUST use the provided tools to create and manipulate shapes.
 
-CRITICAL: When user asks to create shapes, you MUST call the createShape tool for EACH shape requested.
-Example: "create 4 circles" = call createShape tool 4 times with type='circle'
-Example: "create 3 rectangles and 2 circles" = call createShape 3 times with type='rect' + 2 times with type='circle'
+CRITICAL: When user asks to create multiple shapes, use the createShapes tool (plural) with an array of shapes for better performance.
+Example: "create 4 circles" = call createShapes tool ONCE with shapes=[{type:'circle', ...}, {type:'circle', ...}, ...]
+Example: "create 3 rectangles and 2 circles" = call createShapes ONCE with shapes=[3 rects + 2 circles]
+Only use createShape (singular) for a single shape.
 
 Available shape types: rectangle (rect), circle, text
 Canvas coordinates: 0-2000 for both x and y
