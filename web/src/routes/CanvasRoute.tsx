@@ -14,7 +14,6 @@ export default function CanvasRoute() {
   const [showProfileSettings, setShowProfileSettings] = useState(false)
   const [sessionName, setSessionName] = useState(() => localStorage.getItem('session_name') || '')
   const [sessionColor, setSessionColor] = useState(() => localStorage.getItem('session_color') || '#ef4444')
-  const [sessionUpdateKey, setSessionUpdateKey] = useState(0)
   const showAI = true
 
   useEffect(() => {
@@ -32,7 +31,7 @@ export default function CanvasRoute() {
   const handleSessionSettingsChange = (name: string, color: string) => {
     setSessionName(name)
     setSessionColor(color)
-    setSessionUpdateKey(prev => prev + 1) // Force re-render of CanvasStage
+    // No force re-render - CanvasStage will handle updates internally
   }
 
   return (
@@ -103,7 +102,7 @@ export default function CanvasRoute() {
           </div>
         </header>
             <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-              {canvasId ? <CanvasStage key={sessionUpdateKey} canvasId={canvasId} /> : null}
+              {canvasId ? <CanvasStage canvasId={canvasId} /> : null}
               {canvasId ? <PresenceSidebar /> : null}
               {canvasId && showAI ? <AIPanel canvasId={canvasId} /> : null}
             </div>

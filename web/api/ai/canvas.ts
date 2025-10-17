@@ -1,12 +1,13 @@
 import { openai } from '@ai-sdk/openai'
-import { streamText, tool } from 'ai'
+import { streamText, CoreTool } from 'ai'
 import { z } from 'zod'
 
 export const runtime = 'edge'
 
-// Tool definitions for client-side execution (no execute functions for streamText)
-const tools = {
-  createShape: tool({
+// Tool definitions for client-side execution
+// Using CoreTool type directly to avoid tool() wrapper issues  
+const tools: Record<string, CoreTool> = {
+  createShape: {
     description: 'Create a new shape (rectangle, circle, or text) on the canvas at specified position with optional styling',
     parameters: z.object({
       type: z.enum(['rect', 'circle', 'text']).describe('The type of shape to create'),
@@ -17,65 +18,65 @@ const tools = {
       color: z.string().optional().describe('Fill color as hex code like #4f46e5'),
       text: z.string().optional().describe('Text content when type is text'),
     }),
-  }),
+  },
   
-  moveShape: tool({
+  moveShape: {
     description: 'Move an existing shape to a new position',
     parameters: z.object({
       id: z.string().describe('Shape ID to move'),
       x: z.number().describe('New X coordinate'),
       y: z.number().describe('New Y coordinate'),
     }),
-  }),
+  },
   
-  resizeShape: tool({
+  resizeShape: {
     description: 'Resize an existing shape',
     parameters: z.object({
       id: z.string().describe('Shape ID to resize'),
       width: z.number().describe('New width in pixels'),
       height: z.number().describe('New height in pixels'),
     }),
-  }),
+  },
   
-  rotateShape: tool({
+  rotateShape: {
     description: 'Rotate an existing shape by degrees',
     parameters: z.object({
       id: z.string().describe('Shape ID to rotate'),
       degrees: z.number().describe('Rotation angle in degrees (0-360)'),
     }),
-  }),
+  },
   
-  arrangeRow: tool({
+  arrangeRow: {
     description: 'Arrange multiple selected shapes in a horizontal row with spacing',
     parameters: z.object({
       spacing: z.number().default(16).describe('Spacing between shapes in pixels'),
     }),
-  }),
+  },
   
-  arrangeGrid: tool({
+  arrangeGrid: {
     description: 'Arrange multiple selected shapes in a grid layout',
     parameters: z.object({
       rows: z.number().describe('Number of rows'),
       cols: z.number().describe('Number of columns'),
       gap: z.number().optional().describe('Gap between cells in pixels (default: 12)'),
     }),
-  }),
+  },
   
-  distributeShapes: tool({
+  distributeShapes: {
     description: 'Distribute selected shapes evenly along horizontal or vertical axis',
     parameters: z.object({
       axis: z.enum(['x', 'y']).describe('Axis to distribute along (x=horizontal, y=vertical)'),
       spacing: z.number().optional().describe('Optional fixed spacing between shapes'),
     }),
-  }),
+  },
   
-  createLoginForm: tool({
+  createLoginForm: {
     description: 'Create a complete login form with username, password fields and submit button',
     parameters: z.object({
       x: z.number().optional().describe('Starting X position (default: 100)'),
       y: z.number().optional().describe('Starting Y position (default: 100)'),
     }),
-  }),
+  },
 }
 
 export default async function handler(req: Request) {
@@ -115,8 +116,8 @@ For complex requests like "login form", use the specialized pattern tools.`
       tools,
     })
 
-    // Return as a streaming response with tool calls
-    return result.toDataStreamResponse()
+    // Use the correct streaming response method
+    return result.toTextStreamResponse()
   } catch (error: any) {
     console.error('AI Canvas API Error:', error)
     return new Response(JSON.stringify({ error: error.message }), {

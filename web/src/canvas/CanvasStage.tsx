@@ -237,12 +237,14 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         const dy = cursor.target.y - cursor.current.y
         const distance = Math.sqrt(dx * dx + dy * dy)
         
-        // Dynamic lerp factor: faster for larger distances (better responsiveness)
-        let lerpFactor = 0.4 // Base speed (was 0.3)
+        // AGGRESSIVE lerp factors for ultra-responsive feel
+        let lerpFactor = 0.6 // Base speed (increased from 0.4)
         if (distance > 100) {
-          lerpFactor = 0.7 // Much faster for big jumps
+          lerpFactor = 0.85 // Nearly instant for big jumps
         } else if (distance > 50) {
-          lerpFactor = 0.55 // Faster for medium distances
+          lerpFactor = 0.75 // Very fast for medium distances
+        } else if (distance > 20) {
+          lerpFactor = 0.7 // Fast for small-medium distances
         }
         
         const newX = lerp(cursor.current.x, cursor.target.x, lerpFactor)
@@ -279,11 +281,11 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     }
   }, [])
 
-  // Broadcast cursor position on mouse move - OPTIMIZED FOR 60FPS
+  // Broadcast cursor position on mouse move - OPTIMIZED FOR 30FPS
   useEffect(() => {
     let lastPos = { x: 0, y: 0 }
-    const minDelta = 2 // Reduced for smoother tracking
-    const tickMs = 16 // ~60fps (was 50ms = 20fps)
+    const minDelta = 3 // Slightly increased to reduce unnecessary updates
+    const tickMs = 33 // ~30fps (optimal balance: responsive + low bandwidth)
     let lastTick = 0
     
     const handleMove = () => {

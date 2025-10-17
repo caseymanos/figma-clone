@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { usePresenceState } from './presenceState'
 
@@ -23,19 +23,45 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
   const myNameRef = useRef<string>('User')
   const myColorRef = useRef<string>('#ef4444')
   const channelRef = useRef<any>(null)
+  const lastMetadataBroadcastRef = useRef<{ name: string; color: string }>({ name: '', color: '' })
+
+  // Method to update session settings (defined early for use in effects)
+  const updateSessionSettings = useCallback((name: string, color: string) => {
+    myNameRef.current = name
+    myColorRef.current = color
+    
+    // Broadcast updated settings WITH all required fields
+    if (channelRef.current) {
+      channelRef.current.track({
+        x: 0,
+        y: 0,
+        name: name,
+        color: color,
+        avatarUrl: undefined,
+        t: Date.now()
+      })
+      // Update metadata tracking so next cursor move includes it too
+      lastMetadataBroadcastRef.current = { name, color }
+    }
+  }, [])
 
   useEffect(() => {
     const uid = (window as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2)
     myIdRef.current = uid
     
-    // Use session color or generate random one
-    const { sessionColor } = getSessionSettings()
+    // Get session settings FIRST
+    const { sessionName, sessionColor } = getSessionSettings()
+    
+    // Set name from session or default
+    myNameRef.current = sessionName || 'User'
+    
+    // Set color from session or generate with better hash
     if (sessionColor) {
       myColorRef.current = sessionColor
     } else {
       const colors = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
-      const colorIndex = parseInt(uid.slice(-8), 36) % colors.length
-      myColorRef.current = colors[colorIndex]
+      const hash = uid.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0)
+      myColorRef.current = colors[hash % colors.length]
     }
 
     const channel = supabase.channel(`presence:canvas:${canvasId}`, { 
@@ -121,6 +147,9 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
           color: myColorRef.current, 
           t: Date.now() 
         })
+        
+        // Set last metadata so we know what we broadcasted
+        lastMetadataBroadcastRef.current = { name: displayName, color: myColorRef.current }
       }
     })
 
@@ -129,25 +158,47 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
     }
   }, [canvasId, addUser, removeUser, updateUser, onCursorUpdate])
 
-  // Method to update session settings
-  const updateSessionSettings = (name: string, color: string) => {
-    myNameRef.current = name
-    myColorRef.current = color
-    
-    // Broadcast updated settings
-    if (channelRef.current) {
-      channelRef.current.track({
-        name: name,
-        color: color,
-        t: Date.now()
-      })
+  // Listen for session settings updates
+  useEffect(() => {
+    const handleSettingsUpdate = (event: CustomEvent) => {
+      const { name, color } = event.detail
+      updateSessionSettings(name, color)
     }
-  }
+    
+    window.addEventListener('session-settings-updated', handleSettingsUpdate as EventListener)
+    
+    return () => {
+      window.removeEventListener('session-settings-updated', handleSettingsUpdate as EventListener)
+    }
+  }, [updateSessionSettings])
 
   return {
     trackCursor: (x: number, y: number) => {
       if (channelRef.current) {
-        channelRef.current.track({ x, y, t: Date.now() })
+        // Only include metadata if it changed (reduces payload by 50%)
+        const currentMetadata = { name: myNameRef.current, color: myColorRef.current }
+        const metadataChanged = 
+          lastMetadataBroadcastRef.current.name !== currentMetadata.name ||
+          lastMetadataBroadcastRef.current.color !== currentMetadata.color
+        
+        if (metadataChanged) {
+          // Full update with metadata
+          channelRef.current.track({ 
+            x, 
+            y, 
+            name: currentMetadata.name,
+            color: currentMetadata.color,
+            t: Date.now() 
+          })
+          lastMetadataBroadcastRef.current = currentMetadata
+        } else {
+          // Position-only update (50% smaller payload)
+          channelRef.current.track({ 
+            x, 
+            y, 
+            t: Date.now() 
+          })
+        }
       }
     },
     updateSessionSettings,

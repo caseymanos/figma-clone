@@ -34,6 +34,12 @@ export function SessionSettings({ onSettingsChange, currentName, currentColor }:
     const finalColor = color === 'custom' ? customColor : color
     localStorage.setItem('session_name', name)
     localStorage.setItem('session_color', finalColor)
+    
+    // Dispatch custom event for presence system to pick up
+    window.dispatchEvent(new CustomEvent('session-settings-updated', {
+      detail: { name, color: finalColor }
+    }))
+    
     onSettingsChange(name, finalColor)
     setIsOpen(false)
   }

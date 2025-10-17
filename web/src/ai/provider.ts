@@ -50,17 +50,29 @@ export const provider: Provider = {
         buffer = lines.pop() || ''
 
         for (const line of lines) {
-          if (!line.trim() || !line.startsWith('0:')) continue
+          if (!line.trim()) continue
           
+          // Data stream format: lines start with data part identifier like "0:", "2:", "8:", etc.
+          let json: any
           try {
-            const json = JSON.parse(line.slice(2))
+            // Try parsing with prefix
+            if (line.includes(':')) {
+              const colonIndex = line.indexOf(':')
+              json = JSON.parse(line.slice(colonIndex + 1))
+            } else {
+              json = JSON.parse(line)
+            }
             
-            // Extract tool calls from the stream
-            if (json.type === 'tool-call') {
+            console.log('Stream event:', json.type || json, json)
+            
+            // Extract tool calls from the data stream
+            // Data stream format sends tool-call events
+            if (json.type === 'tool-call' || json.type === 'tool_call') {
+              console.log('Tool call found:', json.toolName, json.args)
               toolCalls.push(json)
             }
           } catch (e) {
-            // Skip malformed JSON
+            console.warn('Failed to parse stream line:', line.substring(0, 100))
           }
         }
       }
@@ -149,26 +161,17 @@ export const provider: Provider = {
         }
       }
 
-      // Fallback: if no tool calls, try to create a basic shape
+      // No fallback - if AI didn't call tools, we should fail clearly
       if (intents.length === 0) {
-        intents.push({
-          kind: 'create',
-          type: 'rect',
-          x: 100,
-          y: 100,
-        })
+        console.warn('No tool calls extracted from AI response')
+        throw new Error('AI did not generate any valid tool calls. Try rephrasing your request.')
       }
 
+      console.log('Parsed intents:', intents)
       return intents
     } catch (error: any) {
       console.error('Provider parse error:', error)
-      // Fallback to a basic operation
-      return [{
-        kind: 'create',
-        type: 'rect',
-        x: 100 + Math.random() * 200,
-        y: 100 + Math.random() * 200,
-      }]
+      throw error // Don't silently create fallback shape
     }
   },
 }
