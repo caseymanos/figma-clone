@@ -2,9 +2,7 @@ import { openai } from '@ai-sdk/openai'
 import { streamText, tool } from 'ai'
 import { z } from 'zod'
 
-export const config = {
-  runtime: 'edge',
-}
+export const runtime = 'edge'
 
 // Tool definitions matching our canvas operations
 const tools = {
@@ -19,7 +17,6 @@ const tools = {
       color: z.string().optional().describe('Fill color as hex code like #4f46e5'),
       text: z.string().optional().describe('Text content when type is text'),
     }),
-    execute: async (params) => params, // Client handles execution
   }),
   
   moveShape: tool({
@@ -29,7 +26,6 @@ const tools = {
       x: z.number().describe('New X coordinate'),
       y: z.number().describe('New Y coordinate'),
     }),
-    execute: async (params) => params,
   }),
   
   resizeShape: tool({
@@ -39,7 +35,6 @@ const tools = {
       width: z.number().describe('New width in pixels'),
       height: z.number().describe('New height in pixels'),
     }),
-    execute: async (params) => params,
   }),
   
   rotateShape: tool({
@@ -48,7 +43,6 @@ const tools = {
       id: z.string().describe('Shape ID to rotate'),
       degrees: z.number().describe('Rotation angle in degrees (0-360)'),
     }),
-    execute: async (params) => params,
   }),
   
   arrangeRow: tool({
@@ -56,7 +50,6 @@ const tools = {
     parameters: z.object({
       spacing: z.number().default(16).describe('Spacing between shapes in pixels'),
     }),
-    execute: async (params) => params,
   }),
   
   arrangeGrid: tool({
@@ -66,7 +59,6 @@ const tools = {
       cols: z.number().describe('Number of columns'),
       gap: z.number().optional().describe('Gap between cells in pixels (default: 12)'),
     }),
-    execute: async (params) => params,
   }),
   
   distributeShapes: tool({
@@ -75,7 +67,6 @@ const tools = {
       axis: z.enum(['x', 'y']).describe('Axis to distribute along (x=horizontal, y=vertical)'),
       spacing: z.number().optional().describe('Optional fixed spacing between shapes'),
     }),
-    execute: async (params) => params,
   }),
   
   createLoginForm: tool({
@@ -84,7 +75,6 @@ const tools = {
       x: z.number().optional().describe('Starting X position (default: 100)'),
       y: z.number().optional().describe('Starting Y position (default: 100)'),
     }),
-    execute: async (params) => params,
   }),
 }
 
@@ -101,11 +91,16 @@ export default async function handler(req: Request) {
     }
 
     // Build context for the LLM
-    const systemPrompt = `You are a canvas design assistant. You help users create and manipulate shapes on a collaborative canvas.
+    const systemPrompt = `You are a canvas design assistant. You MUST use the provided tools to create and manipulate shapes.
+
+CRITICAL: When user asks to create shapes, you MUST call the createShape tool for EACH shape requested.
+Example: "create 4 circles" = call createShape tool 4 times with type='circle'
+Example: "create 3 rectangles and 2 circles" = call createShape 3 times with type='rect' + 2 times with type='circle'
 
 Available shape types: rectangle (rect), circle, text
 Default colors: #4f46e5 (blue), #ef4444 (red), #10b981 (green), #f59e0b (yellow)
 Canvas coordinates: 0-2000 for both x and y
+Default spacing: When creating multiple shapes, spread them 150px apart horizontally so they don't overlap
 
 ${selectedIds && selectedIds.length > 0 ? `Currently selected shapes: ${selectedIds.join(', ')}` : 'No shapes currently selected.'}
 
@@ -113,15 +108,16 @@ When users ask to create shapes, use reasonable default sizes and positions unle
 When users refer to "these" or "selected shapes", use layout tools that operate on the selection.
 For complex requests like "login form", use the specialized pattern tools.`
 
-    const result = await streamText({
+    const result = streamText({
       model: openai('gpt-4o-mini'),
       system: systemPrompt,
       prompt,
       tools,
-      maxSteps: 5, // Allow multi-step reasoning
+      maxToolRoundtrips: 5, // Allow multi-step reasoning
     })
 
-    return result.toDataStreamResponse()
+    // Return as a streaming response with tool calls
+    return result.toDataStream()
   } catch (error: any) {
     console.error('AI Canvas API Error:', error)
     return new Response(JSON.stringify({ error: error.message }), {
