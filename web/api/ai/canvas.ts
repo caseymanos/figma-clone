@@ -143,13 +143,9 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ]
 
-export default async function handler(req: Request) {
-  if (req.method !== 'POST') {
-    return new Response('Method not allowed', { status: 405 })
-  }
-
+export async function POST(request: Request): Promise<Response> {
   try {
-    const { prompt, canvasId, selectedIds } = await req.json()
+    const { prompt, canvasId, selectedIds } = await request.json()
 
     if (!prompt || !canvasId) {
       return new Response('Missing prompt or canvasId', { status: 400 })
