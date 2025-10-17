@@ -199,7 +199,7 @@ export default function CanvasRoute() {
           </div>
         </header>
             <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-              {canvasId ? <CanvasStage canvasId={canvasId} /> : null}
+              {canvasId ? <CanvasStage canvasId={canvasId} selectedColor={selectedColorHex} /> : null}
               {canvasId ? <PresenceSidebar /> : null}
               {canvasId && showAI ? (
                 <div style={{ position: 'fixed', bottom: 16, left: 16, width: 380, maxWidth: 'calc(100vw - 32px)', display: 'flex', flexDirection: 'column', gap: 0 }}>

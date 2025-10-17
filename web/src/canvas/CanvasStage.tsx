@@ -29,7 +29,7 @@ function lerp(start: number, end: number, t: number): number {
   return start + (end - start) * t
 }
 
-export function CanvasStage({ canvasId }: { canvasId: string }) {
+export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; selectedColor?: string }) {
   const stageRef = useRef<any>(null)
   const objectLayerRef = useRef<any>(null)
   const cursorLayerRef = useRef<any>(null)
@@ -433,7 +433,7 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       type,
       x: 100 + Math.random() * 200,
       y: 100 + Math.random() * 200,
-      fill: '#4f46e5'
+      fill: selectedColor || '#4f46e5'
     }
 
     if (type === 'rect') {
