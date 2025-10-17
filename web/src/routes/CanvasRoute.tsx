@@ -7,6 +7,8 @@ import { ProfileSettings } from '../components/ProfileSettings'
 import { SessionSettings } from '../components/SessionSettings'
 import { AIPanel } from '../components/AIPanel'
 import { ColorPalette } from '../components/ColorPalette'
+import { Icon } from '../components/icons/Icon'
+import { colors, typography, spacing, borderRadius, components, transitions } from '../styles/design-tokens'
 
 export default function CanvasRoute() {
   const navigate = useNavigate()
@@ -62,68 +64,137 @@ export default function CanvasRoute() {
 
   return (
     <Suspense fallback={null}>
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <header style={{ padding: 8, display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid #eee', background: '#fafafa' }}>
-          <button 
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: colors.chrome.canvas }}>
+        <header style={{
+          height: components.header.height,
+          padding: components.header.padding,
+          display: 'flex',
+          alignItems: 'center',
+          gap: spacing[2],
+          background: colors.chrome.header,
+          borderBottom: `1px solid ${colors.gray[800]}`,
+          color: colors.text.inverse,
+          fontFamily: typography.fontFamily.base,
+        }}>
+          <button
             onClick={() => navigate('/')}
-            style={{ padding: '6px 12px', borderRadius: 4, border: '1px solid #ddd', background: 'white', cursor: 'pointer' }}
+            onMouseEnter={(e) => e.currentTarget.style.background = colors.gray[800]}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            style={{
+              height: '32px',
+              padding: '0 12px',
+              borderRadius: borderRadius.base,
+              border: 'none',
+              background: 'transparent',
+              color: colors.text.inverse,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: spacing[1],
+              fontSize: typography.fontSize.sm,
+              fontWeight: typography.fontWeight.medium,
+              transition: transitions.colors,
+            }}
           >
-            ← Home
+            <Icon name="chevronLeft" size={14} color={colors.text.inverse} />
+            Home
           </button>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <strong>Canvas:</strong>
-            <code style={{ 
-              padding: '4px 8px', 
-              background: '#f0f0f0', 
-              borderRadius: 4, 
-              fontSize: '12px',
-              maxWidth: '200px',
+
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            gap: spacing[2],
+            paddingLeft: spacing[2],
+          }}>
+            <div style={{
+              fontSize: typography.fontSize.sm,
+              fontWeight: typography.fontWeight.medium,
+              color: colors.text.inverse,
+              maxWidth: '300px',
               overflow: 'hidden',
-              textOverflow: 'ellipsis'
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}>
-              {canvasId}
-            </code>
-            <button 
+              {canvasId?.split('-')[0] || 'Untitled'}
+            </div>
+
+            <button
               onClick={copyToClipboard}
-              style={{ 
-                padding: '6px 12px', 
-                borderRadius: 4, 
-                border: '1px solid #4f46e5', 
-                background: copied ? '#10b981' : '#4f46e5',
+              onMouseEnter={(e) => e.currentTarget.style.background = copied ? colors.status.online : colors.primary[700]}
+              onMouseLeave={(e) => e.currentTarget.style.background = copied ? colors.status.online : colors.primary[600]}
+              style={{
+                height: '28px',
+                padding: '0 12px',
+                borderRadius: borderRadius.base,
+                border: 'none',
+                background: copied ? colors.status.online : colors.primary[600],
                 color: 'white',
                 cursor: 'pointer',
-                transition: 'all 0.2s'
+                display: 'flex',
+                alignItems: 'center',
+                gap: spacing[1],
+                fontSize: typography.fontSize.sm,
+                fontWeight: typography.fontWeight.medium,
+                transition: transitions.colors,
               }}
             >
-              {copied ? '✓ Copied!' : '📋 Copy Share Link'}
+              <Icon name={copied ? 'check' : 'link'} size={14} color="white" />
+              {copied ? 'Copied' : 'Share'}
             </button>
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+
+          <div style={{ display: 'flex', gap: spacing[1], alignItems: 'center' }}>
             <SessionSettings
               onSettingsChange={handleSessionSettingsChange}
               currentName={sessionName}
               currentColor={sessionColor}
             />
-            <button 
+
+            <button
               onClick={() => setShowProfileSettings(true)}
-              style={{ 
-                padding: '6px 12px', 
-                borderRadius: 4, 
-                border: '1px solid #ddd', 
-                background: 'white', 
+              onMouseEnter={(e) => e.currentTarget.style.background = colors.gray[800]}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+              title="Profile Settings"
+              style={{
+                width: '32px',
+                height: '32px',
+                padding: 0,
+                borderRadius: borderRadius.base,
+                border: 'none',
+                background: 'transparent',
+                color: colors.text.inverse,
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4
+                justifyContent: 'center',
+                transition: transitions.colors,
               }}
             >
-              👤 Profile
+              <Icon name="user" size={16} color={colors.text.inverse} />
             </button>
-            <button 
+
+            <button
               onClick={() => supabase.auth.signOut()}
-              style={{ padding: '6px 12px', borderRadius: 4, border: '1px solid #ddd', background: 'white', cursor: 'pointer' }}
+              onMouseEnter={(e) => e.currentTarget.style.background = colors.gray[800]}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+              title="Sign Out"
+              style={{
+                width: '32px',
+                height: '32px',
+                padding: 0,
+                borderRadius: borderRadius.base,
+                border: 'none',
+                background: 'transparent',
+                color: colors.text.inverse,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: transitions.colors,
+              }}
             >
-              Sign out
+              <Icon name="logout" size={16} color={colors.text.inverse} />
             </button>
           </div>
         </header>
