@@ -5,6 +5,48 @@ export const maxDuration = 30 // 30 second timeout
 
 // Note: OpenAI client is created inside the handler so we can detect env at runtime
 
+// Color palette - single source of truth for all canvas colors
+const CANVAS_COLORS: Record<string, string> = {
+  // Primary brand colors
+  indigo: '#4f46e5',
+  purple: '#7c3aed',
+  
+  // Vibrant colors
+  red: '#ef4444',
+  orange: '#f97316',
+  yellow: '#eab308',
+  green: '#22c55e',
+  cyan: '#06b6d4',
+  blue: '#3b82f6',
+  
+  // Neutral palette
+  gray: '#6b7280',
+  slate: '#64748b',
+  zinc: '#71717a',
+  
+  // Light variants
+  'indigo-light': '#e0e7ff',
+  'red-light': '#fee2e2',
+  'green-light': '#dcfce7',
+  'blue-light': '#dbeafe',
+  'yellow-light': '#fef08a',
+  'orange-light': '#ffedd5',
+  
+  // Dark variants
+  'indigo-dark': '#312e81',
+  'red-dark': '#7f1d1d',
+  'green-dark': '#15803d',
+  'blue-dark': '#1e40af',
+  'yellow-dark': '#ca8a04',
+  'orange-dark': '#92400e',
+  
+  // Grays
+  white: '#ffffff',
+  'gray-900': '#111827',
+  'gray-800': '#1f2937',
+  'gray-700': '#374151',
+}
+
 // Tool definitions for OpenAI function calling
 // These will be executed client-side
 const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
@@ -12,7 +54,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'createShape',
-      description: 'Create a new shape (rectangle, circle, or text) on the canvas at specified position with optional styling',
+      description: 'Create a new shape with specified color and position on the canvas',
       parameters: {
         type: 'object',
         properties: {
@@ -21,11 +63,14 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
             enum: ['rect', 'circle', 'text'],
             description: 'The type of shape to create',
           },
-          x: { type: 'number', description: 'X coordinate position (0-2000)' },
+          color: {
+            type: 'string',
+            description: 'Color name from palette (e.g., indigo, red, green-light, blue-dark) or hex code',
+          },
+          x: { type: 'number', description: 'X coordinate position (0-2000), use positioning keywords like top-left, center, bottom-right' },
           y: { type: 'number', description: 'Y coordinate position (0-2000)' },
           width: { type: 'number', description: 'Width in pixels' },
           height: { type: 'number', description: 'Height in pixels' },
-          color: { type: 'string', description: 'Fill color as hex code like #4f46e5' },
           text: { type: 'string', description: 'Text content when type is text' },
         },
         required: ['type', 'x', 'y'],
@@ -143,6 +188,77 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ]
 
+// Interpret color descriptions and return hex code
+function interpretColor(description: string): string {
+  const normalized = description.toLowerCase().trim()
+  
+  // Step 1: Direct match check
+  if (CANVAS_COLORS[normalized]) return CANVAS_COLORS[normalized]
+  
+  // Step 2: Modifier matching (e.g., "dark red" → "red-dark")
+  const modifiers = ['light', 'dark', 'bright']
+  for (const mod of modifiers) {
+    if (normalized.includes(mod)) {
+      const colorName = normalized.replace(mod, '').trim()
+      const key = `${colorName}-${mod}`
+      if (CANVAS_COLORS[key]) return CANVAS_COLORS[key]
+    }
+  }
+  
+  // Step 3: Validate hex codes
+  if (/^#[0-9a-f]{6}$/i.test(normalized)) {
+    return normalized.toLowerCase()
+  }
+  
+  // Step 4: Fallback - find closest match using fuzzy matching
+  return findClosestColor(description) || CANVAS_COLORS.indigo
+}
+
+// Find closest color match for ambiguous descriptions
+function findClosestColor(description: string): string {
+  const normalized = description.toLowerCase()
+  for (const [name, hex] of Object.entries(CANVAS_COLORS)) {
+    if (name.includes(normalized) || normalized.includes(name)) {
+      return hex
+    }
+  }
+  return CANVAS_COLORS.indigo // default fallback
+}
+
+// Interpret position descriptions and return x, y coordinates
+function interpretPosition(description: string): { x: number; y: number } {
+  const normalized = description.toLowerCase()
+  
+  const positions: Record<string, { x: number; y: number }> = {
+    'top-left': { x: 300, y: 200 },
+    'top-center': { x: 1000, y: 200 },
+    'top-middle': { x: 1000, y: 200 },
+    'top-right': { x: 1700, y: 200 },
+    'center': { x: 1000, y: 1000 },
+    'middle': { x: 1000, y: 1000 },
+    'bottom-left': { x: 300, y: 1800 },
+    'bottom-center': { x: 1000, y: 1800 },
+    'bottom-middle': { x: 1000, y: 1800 },
+    'bottom-right': { x: 1700, y: 1800 },
+    'left': { x: 300, y: 1000 },
+    'right': { x: 1700, y: 1000 },
+  }
+  
+  // Check if any position keyword matches
+  for (const [key, pos] of Object.entries(positions)) {
+    if (normalized.includes(key)) {
+      // Validate coordinates are within canvas bounds [0, 2000]
+      return {
+        x: Math.max(0, Math.min(2000, pos.x)),
+        y: Math.max(0, Math.min(2000, pos.y)),
+      }
+    }
+  }
+  
+  // Default to center if no match
+  return { x: 1000, y: 1000 }
+}
+
 export async function POST(request: Request): Promise<Response> {
   try {
     const { prompt, canvasId, selectedIds } = await request.json()
@@ -159,9 +275,37 @@ Example: "create 4 circles" = call createShape tool 4 times with type='circle'
 Example: "create 3 rectangles and 2 circles" = call createShape 3 times with type='rect' + 2 times with type='circle'
 
 Available shape types: rectangle (rect), circle, text
-Default colors: #4f46e5 (blue), #ef4444 (red), #10b981 (green), #f59e0b (yellow)
 Canvas coordinates: 0-2000 for both x and y
 Default spacing: When creating multiple shapes, spread them 150px apart horizontally so they don't overlap
+
+COLORS AVAILABLE:
+${Object.entries(CANVAS_COLORS).map(([name, hex]) => `- ${name}: ${hex}`).join('\n')}
+
+When user mentions a color, map it to the closest available color from above.
+Color interpretation examples:
+- "blue" → "blue" (#3b82f6)
+- "dark blue" → "blue-dark" (#1e40af)  
+- "light red" → "red-light" (#fee2e2)
+- "navy" → "blue-dark"
+- "crimson" → "red"
+- "bright green" → "green" (#22c55e)
+
+POSITIONING KEYWORDS:
+When user specifies a position, use these mappings:
+- "top-left" or "top left" → x: 300, y: 200
+- "top-center" or "top middle" → x: 1000, y: 200
+- "top-right" → x: 1700, y: 200
+- "center" or "middle" → x: 1000, y: 1000
+- "bottom-left" → x: 300, y: 1800
+- "bottom-center" → x: 1000, y: 1800
+- "bottom-right" → x: 1700, y: 1800
+- "left" → x: 300, y: 1000
+- "right" → x: 1700, y: 1000
+
+Positioning examples:
+- "create a circle in the center" → x: 1000, y: 1000
+- "put a red square in the top right" → x: 1700, y: 200, color: red
+- "3 shapes across the top" → y: 200, spread x positions
 
 ${selectedIds && selectedIds.length > 0 ? `Currently selected shapes: ${selectedIds.join(', ')}` : 'No shapes currently selected.'}
 
