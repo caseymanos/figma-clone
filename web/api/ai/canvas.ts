@@ -1,92 +1,150 @@
-import { openai } from '@ai-sdk/openai'
-import { streamText, tool } from 'ai'
-import { z } from 'zod'
+import OpenAI from 'openai'
 
 export const runtime = 'edge'
 export const maxDuration = 30 // 30 second timeout
 
-// Tool definitions matching canvas operations
-// For client-side execution, execute returns params which client handles
-const tools = {
-  createShape: tool({
-    description: 'Create a new shape (rectangle, circle, or text) on the canvas at specified position with optional styling',
-    parameters: z.object({
-      type: z.enum(['rect', 'circle', 'text']).describe('The type of shape to create'),
-      x: z.number().describe('X coordinate position (0-2000)'),
-      y: z.number().describe('Y coordinate position (0-2000)'),
-      width: z.number().optional().describe('Width in pixels (default: 120 for rect, 80 for circle, 200 for text)'),
-      height: z.number().optional().describe('Height in pixels (default: 80 for rect, 80 for circle, 40 for text)'),
-      color: z.string().optional().describe('Fill color as hex code like #4f46e5'),
-      text: z.string().optional().describe('Text content when type is text'),
-    }),
-    execute: async (params) => params, // Client handles actual execution
-  }),
-  
-  moveShape: tool({
-    description: 'Move an existing shape to a new position',
-    parameters: z.object({
-      id: z.string().describe('Shape ID to move'),
-      x: z.number().describe('New X coordinate'),
-      y: z.number().describe('New Y coordinate'),
-    }),
-    execute: async (params) => params,
-  }),
-  
-  resizeShape: tool({
-    description: 'Resize an existing shape',
-    parameters: z.object({
-      id: z.string().describe('Shape ID to resize'),
-      width: z.number().describe('New width in pixels'),
-      height: z.number().describe('New height in pixels'),
-    }),
-    execute: async (params) => params,
-  }),
-  
-  rotateShape: tool({
-    description: 'Rotate an existing shape by degrees',
-    parameters: z.object({
-      id: z.string().describe('Shape ID to rotate'),
-      degrees: z.number().describe('Rotation angle in degrees (0-360)'),
-    }),
-    execute: async (params) => params,
-  }),
-  
-  arrangeRow: tool({
-    description: 'Arrange multiple selected shapes in a horizontal row with spacing',
-    parameters: z.object({
-      spacing: z.number().default(16).describe('Spacing between shapes in pixels'),
-    }),
-    execute: async (params) => params,
-  }),
-  
-  arrangeGrid: tool({
-    description: 'Arrange multiple selected shapes in a grid layout',
-    parameters: z.object({
-      rows: z.number().describe('Number of rows'),
-      cols: z.number().describe('Number of columns'),
-      gap: z.number().optional().describe('Gap between cells in pixels (default: 12)'),
-    }),
-    execute: async (params) => params,
-  }),
-  
-  distributeShapes: tool({
-    description: 'Distribute selected shapes evenly along horizontal or vertical axis',
-    parameters: z.object({
-      axis: z.enum(['x', 'y']).describe('Axis to distribute along (x=horizontal, y=vertical)'),
-      spacing: z.number().optional().describe('Optional fixed spacing between shapes'),
-    }),
-    execute: async (params) => params,
-  }),
-  
-  createLoginForm: tool({
-    description: 'Create a complete login form with username, password fields and submit button',
-    parameters: z.object({
-      x: z.number().optional().describe('Starting X position (default: 100)'),
-      y: z.number().optional().describe('Starting Y position (default: 100)'),
-    }),
-    execute: async (params) => params,
-  }),
-}
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+})
+
+// Tool definitions for OpenAI function calling
+// These will be executed client-side
+const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'createShape',
+      description: 'Create a new shape (rectangle, circle, or text) on the canvas at specified position with optional styling',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['rect', 'circle', 'text'],
+            description: 'The type of shape to create',
+          },
+          x: { type: 'number', description: 'X coordinate position (0-2000)' },
+          y: { type: 'number', description: 'Y coordinate position (0-2000)' },
+          width: { type: 'number', description: 'Width in pixels' },
+          height: { type: 'number', description: 'Height in pixels' },
+          color: { type: 'string', description: 'Fill color as hex code like #4f46e5' },
+          text: { type: 'string', description: 'Text content when type is text' },
+        },
+        required: ['type', 'x', 'y'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'moveShape',
+      description: 'Move an existing shape to a new position',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Shape ID to move' },
+          x: { type: 'number', description: 'New X coordinate' },
+          y: { type: 'number', description: 'New Y coordinate' },
+        },
+        required: ['id', 'x', 'y'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'resizeShape',
+      description: 'Resize an existing shape',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Shape ID to resize' },
+          width: { type: 'number', description: 'New width in pixels' },
+          height: { type: 'number', description: 'New height in pixels' },
+        },
+        required: ['id', 'width', 'height'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'rotateShape',
+      description: 'Rotate an existing shape by degrees',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Shape ID to rotate' },
+          degrees: { type: 'number', description: 'Rotation angle in degrees (0-360)' },
+        },
+        required: ['id', 'degrees'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'arrangeRow',
+      description: 'Arrange multiple selected shapes in a horizontal row with spacing',
+      parameters: {
+        type: 'object',
+        properties: {
+          spacing: { type: 'number', description: 'Spacing between shapes in pixels', default: 16 },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'arrangeGrid',
+      description: 'Arrange multiple selected shapes in a grid layout',
+      parameters: {
+        type: 'object',
+        properties: {
+          rows: { type: 'number', description: 'Number of rows' },
+          cols: { type: 'number', description: 'Number of columns' },
+          gap: { type: 'number', description: 'Gap between cells in pixels (default: 12)' },
+        },
+        required: ['rows', 'cols'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'distributeShapes',
+      description: 'Distribute selected shapes evenly along horizontal or vertical axis',
+      parameters: {
+        type: 'object',
+        properties: {
+          axis: {
+            type: 'string',
+            enum: ['x', 'y'],
+            description: 'Axis to distribute along (x=horizontal, y=vertical)',
+          },
+          spacing: { type: 'number', description: 'Optional fixed spacing between shapes' },
+        },
+        required: ['axis'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'createLoginForm',
+      description: 'Create a complete login form with username, password fields and submit button',
+      parameters: {
+        type: 'object',
+        properties: {
+          x: { type: 'number', description: 'Starting X position (default: 100)' },
+          y: { type: 'number', description: 'Starting Y position (default: 100)' },
+        },
+      },
+    },
+  },
+]
 
 export default async function handler(req: Request) {
   if (req.method !== 'POST') {
@@ -118,16 +176,87 @@ When users ask to create shapes, use reasonable default sizes and positions unle
 When users refer to "these" or "selected shapes", use layout tools that operate on the selection.
 For complex requests like "login form", use the specialized pattern tools.`
 
-    const result = streamText({
-      model: openai('gpt-4o-mini'),
-      system: systemPrompt,
-      prompt,
+    // Use OpenAI streaming with tool_choice='required' to force tool usage
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
       tools,
-      // No maxSteps - we want single-pass tool generation for client-side execution
+      tool_choice: 'required', // Force the model to call at least one tool
+      stream: true,
     })
 
-    // Return as data stream with tool calls
-    return result.toDataStreamResponse()
+    // Convert OpenAI stream to response with SSE format for client consumption
+    const encoder = new TextEncoder()
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          // Accumulate tool calls since they come in chunks
+          const toolCallsAccumulator: Map<number, {
+            id?: string
+            name?: string
+            arguments: string
+          }> = new Map()
+
+          for await (const chunk of stream) {
+            const delta = chunk.choices[0]?.delta
+            
+            // Accumulate tool call chunks
+            if (delta?.tool_calls) {
+              for (const toolCall of delta.tool_calls) {
+                const index = toolCall.index
+                const existing = toolCallsAccumulator.get(index) || { arguments: '' }
+                
+                if (toolCall.id) existing.id = toolCall.id
+                if (toolCall.function?.name) existing.name = toolCall.function.name
+                if (toolCall.function?.arguments) {
+                  existing.arguments += toolCall.function.arguments
+                }
+                
+                toolCallsAccumulator.set(index, existing)
+              }
+            }
+            
+            // Send text deltas if any
+            if (delta?.content) {
+              const event = {
+                type: 'text-delta',
+                textDelta: delta.content,
+              }
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+            }
+          }
+
+          // Send complete tool calls after stream ends
+          for (const [_, toolCall] of toolCallsAccumulator) {
+            if (toolCall.name && toolCall.arguments) {
+              const event = {
+                type: 'tool-call',
+                toolCallId: toolCall.id,
+                toolName: toolCall.name,
+                args: JSON.parse(toolCall.arguments),
+              }
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+            }
+          }
+
+          controller.close()
+        } catch (error: any) {
+          console.error('Stream error:', error)
+          controller.error(error)
+        }
+      },
+    })
+
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    })
   } catch (error: any) {
     console.error('AI Canvas API Error:', error)
     return new Response(JSON.stringify({ error: error.message }), {
