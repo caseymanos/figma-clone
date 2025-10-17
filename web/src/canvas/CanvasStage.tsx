@@ -60,6 +60,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     name: string
     color: string
     group: Konva.Group | null
+    samples: Array<{ x: number; y: number; t: number }>
   }>>({})
 
   // Load initial objects and subscribe to changes
@@ -182,10 +183,16 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
           name: cursor.name,
           color: cursor.color,
           group,
+          samples: [{ x: cursor.x, y: cursor.y, t: (cursor as any).t ?? Date.now() }],
         }
       } else {
         // Update target position for interpolation
         cursorsData[key].target = { x: cursor.x, y: cursor.y }
+        // Push timestamped sample to jitter buffer (cap length)
+        const buf = cursorsData[key].samples
+        const ts = (cursor as any).t ?? Date.now()
+        buf.push({ x: cursor.x, y: cursor.y, t: ts })
+        if (buf.length > 16) buf.shift()
 
         // Update label if name changed
         if (cursorsData[key].name !== cursor.name) {
@@ -246,7 +253,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     }
   }, [])
 
-  // Animation loop for smooth cursor interpolation - OPTIMIZED
+  // Animation loop for smooth cursor interpolation with jitter buffer
   useEffect(() => {
     const anim = new Konva.Animation(() => {
       const cursorLayer = cursorLayerRef.current
@@ -255,18 +262,45 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       let needsRedraw = false
       const cursorsData = cursorsDataRef.current
 
+      // Render slightly in the past to interpolate between samples
+      const renderDelayMs = 80
+      const renderTime = performance.now() - renderDelayMs
+
+      function getDesiredPosition(samples: Array<{ x: number; y: number; t: number }>, fallback: { x: number; y: number }) {
+        if (!samples || samples.length === 0) return fallback
+        // If not enough samples, return last
+        if (samples.length === 1) return { x: samples[0].x, y: samples[0].y }
+        // Find two samples surrounding renderTime
+        let a = samples[0]
+        let b = samples[samples.length - 1]
+        if (renderTime <= a.t) return { x: a.x, y: a.y }
+        if (renderTime >= b.t) return { x: b.x, y: b.y }
+        for (let i = 1; i < samples.length; i++) {
+          const s = samples[i]
+          if (s.t >= renderTime) {
+            a = samples[i - 1]
+            b = s
+            break
+          }
+        }
+        const span = Math.max(1, b.t - a.t)
+        const tt = (renderTime - a.t) / span
+        return { x: lerp(a.x, b.x, tt), y: lerp(a.y, b.y, tt) }
+      }
+
       Object.values(cursorsData).forEach(cursor => {
         if (!cursor.group) return
 
-        // Adaptive interpolation - faster when cursor is moving quickly
-        const dx = cursor.target.x - cursor.current.x
-        const dy = cursor.target.y - cursor.current.y
+        // Compute desired position from jitter buffer
+        const desired = getDesiredPosition(cursor.samples, cursor.target)
+        const dx = desired.x - cursor.current.x
+        const dy = desired.y - cursor.current.y
         const distance = Math.sqrt(dx * dx + dy * dy)
 
         // Snap when very close to avoid micro-jitter
         if (distance < 0.75) {
-          cursor.current.x = cursor.target.x
-          cursor.current.y = cursor.target.y
+          cursor.current.x = desired.x
+          cursor.current.y = desired.y
         } else {
           // AGGRESSIVE lerp factors for ultra-responsive feel
           let lerpFactor = 0.6 // Base speed (increased from 0.4)
@@ -280,8 +314,8 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
             lerpFactor = 0.5 // Slightly lower near target to reduce overshoot
           }
 
-          const newX = lerp(cursor.current.x, cursor.target.x, lerpFactor)
-          const newY = lerp(cursor.current.y, cursor.target.y, lerpFactor)
+          const newX = lerp(cursor.current.x, desired.x, lerpFactor)
+          const newY = lerp(cursor.current.y, desired.y, lerpFactor)
           cursor.current.x = newX
           cursor.current.y = newY
         }
