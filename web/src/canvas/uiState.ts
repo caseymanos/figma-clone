@@ -11,10 +11,13 @@ export type SnapPosition =
   | 'bottom-center'
   | 'bottom-right'
 
+export type ColorTab = 'presets' | 'custom'
+
 interface UIState {
   // Panel visibility states
   colorPaletteCollapsed: boolean
   colorPaletteShowAll: boolean
+  colorPaletteActiveTab: ColorTab
   aiPanelMinimized: boolean
 
   // Panel positions
@@ -29,6 +32,7 @@ interface UIState {
   // Actions
   setColorPaletteCollapsed: (collapsed: boolean) => void
   setColorPaletteShowAll: (showAll: boolean) => void
+  setColorPaletteActiveTab: (tab: ColorTab) => void
   setAIPanelMinimized: (minimized: boolean) => void
   setColorPalettePosition: (position: SnapPosition) => void
   setAIPanelPosition: (position: SnapPosition) => void
@@ -43,6 +47,7 @@ export const useUIState = create<UIState>()(
       // Default states
       colorPaletteCollapsed: false,
       colorPaletteShowAll: false,
+      colorPaletteActiveTab: 'presets',
       aiPanelMinimized: false,
       colorPalettePosition: 'bottom-left',
       aiPanelPosition: 'bottom-left',
@@ -53,6 +58,7 @@ export const useUIState = create<UIState>()(
       // Actions
       setColorPaletteCollapsed: (collapsed) => set({ colorPaletteCollapsed: collapsed }),
       setColorPaletteShowAll: (showAll) => set({ colorPaletteShowAll: showAll }),
+      setColorPaletteActiveTab: (tab) => set({ colorPaletteActiveTab: tab }),
       setAIPanelMinimized: (minimized) => set({ aiPanelMinimized: minimized }),
       setColorPalettePosition: (position) => set({ colorPalettePosition: position }),
       setAIPanelPosition: (position) => set({ aiPanelPosition: position }),

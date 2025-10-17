@@ -1,4 +1,6 @@
 import type { CSSProperties } from 'react'
+import { useState } from 'react'
+import { HexColorPicker } from 'react-colorful'
 import { useUIState } from '../canvas/uiState'
 import { useDraggable } from '../canvas/useDraggable'
 import { getSnapPositionStyle, getSnapPreviewStyle } from '../canvas/snapPositions'
@@ -46,14 +48,18 @@ interface ColorPaletteProps {
 export function ColorPalette({ selectedColor, onColorSelect }: ColorPaletteProps) {
   const collapsed = useUIState((s) => s.colorPaletteCollapsed)
   const showAll = useUIState((s) => s.colorPaletteShowAll)
+  const activeTab = useUIState((s) => s.colorPaletteActiveTab)
   const strokeWidth = useUIState((s) => s.strokeWidth)
   const opacity = useUIState((s) => s.opacity)
   const position = useUIState((s) => s.colorPalettePosition)
   const setCollapsed = useUIState((s) => s.setColorPaletteCollapsed)
   const setShowAll = useUIState((s) => s.setColorPaletteShowAll)
+  const setActiveTab = useUIState((s) => s.setColorPaletteActiveTab)
   const setStrokeWidth = useUIState((s) => s.setStrokeWidth)
   const setOpacity = useUIState((s) => s.setOpacity)
   const setPosition = useUIState((s) => s.setColorPalettePosition)
+  
+  const [customColor, setCustomColor] = useState(selectedColor)
 
   const { isDragging, onMouseDown, dragStyle, previewPosition } = useDraggable({
     currentPosition: position,
@@ -186,6 +192,48 @@ export function ColorPalette({ selectedColor, onColorSelect }: ColorPaletteProps
     cursor: 'pointer',
   }
 
+  const tabStyle = (isActive: boolean): CSSProperties => ({
+    flex: 1,
+    padding: '6px 12px',
+    fontSize: 11,
+    fontWeight: 600,
+    color: isActive ? '#4f46e5' : '#6b7280',
+    background: isActive ? '#eef2ff' : '#f9fafb',
+    border: 'none',
+    borderBottom: isActive ? '2px solid #4f46e5' : '2px solid transparent',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+  })
+
+  const tabContainerStyle: CSSProperties = {
+    display: 'flex',
+    gap: 4,
+    marginBottom: 8,
+    borderBottom: '1px solid #e5e7eb',
+  }
+
+  const customPickerContainerStyle: CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    marginBottom: 8,
+  }
+
+  const colorInputStyle: CSSProperties = {
+    width: '100%',
+    padding: '6px 8px',
+    fontSize: 12,
+    fontFamily: 'monospace',
+    border: '1px solid #d1d5db',
+    borderRadius: 4,
+    outline: 'none',
+  }
+
+  const handleCustomColorChange = (color: string) => {
+    setCustomColor(color)
+    onColorSelect('custom', color)
+  }
+
   if (collapsed) {
     return (
       <>
@@ -234,56 +282,116 @@ export function ColorPalette({ selectedColor, onColorSelect }: ColorPaletteProps
           </button>
         </div>
 
-      {/* Color Grid */}
-      <div style={gridStyle}>
-        {Object.entries(colorsToShow).map(([name, hex]) => (
-          <button
-            key={name}
-            onClick={() => onColorSelect(name, hex)}
-            title={`${name}: ${hex}`}
-            style={getButtonStyle(hex)}
-            onMouseEnter={(e) => {
-              const el = e.currentTarget
-              el.style.borderColor = '#4f46e5'
-              el.style.boxShadow = '0 0 0 2px rgba(79, 70, 229, 0.1)'
-            }}
-            onMouseLeave={(e) => {
-              const el = e.currentTarget
-              el.style.borderColor = selectedColor === hex ? '#4f46e5' : '#d1d5db'
-              el.style.boxShadow = 'none'
-            }}
-          >
-            <div style={swatchStyle(hex)} />
-            <span style={labelStyle}>{name}</span>
-          </button>
-        ))}
+      {/* Tabs */}
+      <div style={tabContainerStyle}>
+        <button
+          onClick={() => setActiveTab('presets')}
+          style={tabStyle(activeTab === 'presets')}
+          onMouseEnter={(e) => {
+            if (activeTab !== 'presets') {
+              e.currentTarget.style.background = '#f3f4f6'
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (activeTab !== 'presets') {
+              e.currentTarget.style.background = '#f9fafb'
+            }
+          }}
+        >
+          Presets
+        </button>
+        <button
+          onClick={() => setActiveTab('custom')}
+          style={tabStyle(activeTab === 'custom')}
+          onMouseEnter={(e) => {
+            if (activeTab !== 'custom') {
+              e.currentTarget.style.background = '#f3f4f6'
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (activeTab !== 'custom') {
+              e.currentTarget.style.background = '#f9fafb'
+            }
+          }}
+        >
+          Custom
+        </button>
       </div>
 
-      {/* Show More/Less Button */}
-      <button
-        onClick={() => setShowAll(!showAll)}
-        style={{
-          width: '100%',
-          padding: '6px',
-          fontSize: 10,
-          fontWeight: 600,
-          color: '#4f46e5',
-          background: '#f9fafb',
-          border: '1px solid #e5e7eb',
-          borderRadius: 4,
-          cursor: 'pointer',
-          marginBottom: 8,
-          transition: 'all 0.2s ease',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = '#eef2ff'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = '#f9fafb'
-        }}
-      >
-        {showAll ? '▲ Show Less' : '▼ Show More Colors'}
-      </button>
+      {/* Presets Tab Content */}
+      {activeTab === 'presets' && (
+        <>
+          {/* Color Grid */}
+          <div style={gridStyle}>
+            {Object.entries(colorsToShow).map(([name, hex]) => (
+              <button
+                key={name}
+                onClick={() => onColorSelect(name, hex)}
+                title={`${name}: ${hex}`}
+                style={getButtonStyle(hex)}
+                onMouseEnter={(e) => {
+                  const el = e.currentTarget
+                  el.style.borderColor = '#4f46e5'
+                  el.style.boxShadow = '0 0 0 2px rgba(79, 70, 229, 0.1)'
+                }}
+                onMouseLeave={(e) => {
+                  const el = e.currentTarget
+                  el.style.borderColor = selectedColor === hex ? '#4f46e5' : '#d1d5db'
+                  el.style.boxShadow = 'none'
+                }}
+              >
+                <div style={swatchStyle(hex)} />
+                <span style={labelStyle}>{name}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Show More/Less Button */}
+          <button
+            onClick={() => setShowAll(!showAll)}
+            style={{
+              width: '100%',
+              padding: '6px',
+              fontSize: 10,
+              fontWeight: 600,
+              color: '#4f46e5',
+              background: '#f9fafb',
+              border: '1px solid #e5e7eb',
+              borderRadius: 4,
+              cursor: 'pointer',
+              marginBottom: 8,
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#eef2ff'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = '#f9fafb'
+            }}
+          >
+            {showAll ? '▲ Show Less' : '▼ Show More Colors'}
+          </button>
+        </>
+      )}
+
+      {/* Custom Tab Content */}
+      {activeTab === 'custom' && (
+        <div style={customPickerContainerStyle}>
+          <HexColorPicker color={customColor} onChange={handleCustomColorChange} style={{ width: '100%' }} />
+          <input
+            type="text"
+            value={customColor}
+            onChange={(e) => {
+              const value = e.target.value
+              if (/^#[0-9A-Fa-f]{0,6}$/.test(value)) {
+                handleCustomColorChange(value)
+              }
+            }}
+            style={colorInputStyle}
+            placeholder="#000000"
+          />
+        </div>
+      )}
 
       {/* Stroke Width */}
       <div style={optionRowStyle}>
