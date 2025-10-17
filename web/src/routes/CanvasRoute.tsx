@@ -6,6 +6,7 @@ import { PresenceSidebar } from '../canvas/PresenceSidebar'
 import { ProfileSettings } from '../components/ProfileSettings'
 import { SessionSettings } from '../components/SessionSettings'
 import { AIPanel } from '../components/AIPanel'
+import { ColorPalette } from '../components/ColorPalette'
 
 export default function CanvasRoute() {
   const navigate = useNavigate()
@@ -14,11 +15,36 @@ export default function CanvasRoute() {
   const [showProfileSettings, setShowProfileSettings] = useState(false)
   const [sessionName, setSessionName] = useState(() => localStorage.getItem('session_name') || '')
   const [sessionColor, setSessionColor] = useState(() => localStorage.getItem('session_color') || '#ef4444')
+  
+  // Color palette state
+  const [selectedColorName, setSelectedColorName] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('canvasSelectedColor')
+      return saved ? JSON.parse(saved).colorName : 'indigo'
+    } catch {
+      return 'indigo'
+    }
+  })
+  const [selectedColorHex, setSelectedColorHex] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('canvasSelectedColor')
+      return saved ? JSON.parse(saved).colorHex : '#4f46e5'
+    } catch {
+      return '#4f46e5'
+    }
+  })
+  
   const showAI = true
 
   useEffect(() => {
     if (!canvasId) navigate('/')
   }, [canvasId, navigate])
+
+  const handleColorSelect = (colorName: string, colorHex: string) => {
+    setSelectedColorName(colorName)
+    setSelectedColorHex(colorHex)
+    localStorage.setItem('canvasSelectedColor', JSON.stringify({ colorName, colorHex }))
+  }
 
   const copyToClipboard = () => {
     const url = window.location.href
@@ -104,7 +130,15 @@ export default function CanvasRoute() {
             <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
               {canvasId ? <CanvasStage canvasId={canvasId} /> : null}
               {canvasId ? <PresenceSidebar /> : null}
-              {canvasId && showAI ? <AIPanel canvasId={canvasId} /> : null}
+              {canvasId && showAI ? (
+                <div style={{ position: 'fixed', bottom: 16, left: 16, width: 380, maxWidth: 'calc(100vw - 32px)', display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  <AIPanel canvasId={canvasId} selectedColorName={selectedColorName} />
+                  <ColorPalette 
+                    selectedColor={selectedColorHex} 
+                    onColorSelect={handleColorSelect}
+                  />
+                </div>
+              ) : null}
             </div>
         {showProfileSettings && (
           <ProfileSettings onClose={() => setShowProfileSettings(false)} />

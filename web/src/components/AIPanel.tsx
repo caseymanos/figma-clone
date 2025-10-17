@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react'
 import { runAgent } from '../ai/agent'
 import { useSelection } from '../canvas/selection'
 
-export function AIPanel({ canvasId }: { canvasId: string }) {
+export function AIPanel({ canvasId, selectedColorName }: { canvasId: string; selectedColorName?: string }) {
   const [prompt, setPrompt] = useState('')
   const [running, setRunning] = useState(false)
   const [steps, setSteps] = useState<{ description: string; status: string; error?: string }[]>([])
@@ -15,7 +15,12 @@ export function AIPanel({ canvasId }: { canvasId: string }) {
     setRunning(true)
     setSteps([])
     try {
-      const res = await runAgent(prompt, { canvasId, selectedIds })
+      // Include selected color in prompt for AI context
+      const enhancedPrompt = selectedColorName 
+        ? `${prompt} (Current color: ${selectedColorName})`
+        : prompt
+      
+      const res = await runAgent(enhancedPrompt, { canvasId, selectedIds })
       setSteps(res.steps)
     } catch (e: any) {
       setSteps([{ description: 'Agent failed', status: 'error', error: e?.message || String(e) }])
@@ -47,6 +52,13 @@ export function AIPanel({ canvasId }: { canvasId: string }) {
         <span style={{ fontSize: 18 }}>🤖</span>
         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#4f46e5' }}>AI Canvas Assistant</h3>
       </div>
+      
+      {selectedColorName && (
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8, padding: '6px 10px', background: '#f3f4f6', borderRadius: 4 }}>
+          Current color: <span style={{ fontWeight: 600, color: '#1f2937' }}>{selectedColorName}</span>
+        </div>
+      )}
+      
       <form onSubmit={onSubmit} style={{ display: 'flex', gap: 8 }}>
         <input
           value={prompt}
