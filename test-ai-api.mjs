@@ -5,7 +5,7 @@
  * Tests that the Edge function returns proper tool calls
  */
 
-const API_URL = 'https://figma-clone-l52mw0b7h-ralc.vercel.app/api/ai/canvas'
+const API_URL = 'https://figma-clone-nlkb7yk1u-ralc.vercel.app/api/ai/canvas'
 
 async function testAIAPI() {
   console.log('🧪 Testing AI Canvas API...\n')
