@@ -4,7 +4,7 @@ import { usePresenceState } from './presenceState'
 
 interface UsePresenceChannelOptions {
   canvasId: string
-  onCursorUpdate?: (cursors: Record<string, { x: number; y: number; name: string; color: string }>) => void
+  onCursorUpdate?: (cursors: Record<string, { x: number; y: number; name: string; color: string; t?: number }>) => void
 }
 
 // Get session settings from localStorage
@@ -72,7 +72,7 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
 
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState() as Record<string, Array<any>>
-      const cursors: Record<string, { x: number; y: number; name: string; color: string }> = {}
+      const cursors: Record<string, { x: number; y: number; name: string; color: string; t?: number }> = {}
 
       Object.entries(state).forEach(([key, arr]) => {
         const latest = arr[arr.length - 1]
@@ -82,7 +82,8 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
           x: latest.x || 0,
           y: latest.y || 0,
           name: latest.name || 'User',
-          color: latest.color || myColorRef.current
+          color: latest.color || myColorRef.current,
+          t: latest.t
         }
 
         // Update presence store (include all sessions)

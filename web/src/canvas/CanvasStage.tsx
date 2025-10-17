@@ -220,6 +220,32 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
     onCursorUpdate: handleCursorUpdate
   })
 
+  // Helper: convert content-space point to stage-space (for drawing)
+  const contentToStage = useCallback((pt: { x: number; y: number }) => {
+    const stage = stageRef.current?.getStage()
+    if (!stage) return pt
+    const transform = stage.getAbsoluteTransform().copy()
+    // Do not invert: content -> stage uses forward transform
+    return transform.point(pt)
+  }, [])
+
+  // Reproject existing cursors when scale/position changes
+  useEffect(() => {
+    const stage = stageRef.current?.getStage()
+    if (!stage) return
+
+    const handleTransform = () => {
+      // Nothing to change in stored content-space coords; drawing uses contentToStage per frame
+      // This callback triggers a redraw to make sure positions update immediately
+      cursorLayerRef.current?.batchDraw()
+    }
+
+    stage.on('scaleXChange scaleYChange xChange yChange', handleTransform)
+    return () => {
+      stage.off('scaleXChange scaleYChange xChange yChange', handleTransform)
+    }
+  }, [])
+
   // Animation loop for smooth cursor interpolation - OPTIMIZED
   useEffect(() => {
     const anim = new Konva.Animation(() => {
@@ -236,36 +262,42 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
         const dx = cursor.target.x - cursor.current.x
         const dy = cursor.target.y - cursor.current.y
         const distance = Math.sqrt(dx * dx + dy * dy)
-        
-        // AGGRESSIVE lerp factors for ultra-responsive feel
-        let lerpFactor = 0.6 // Base speed (increased from 0.4)
-        if (distance > 100) {
-          lerpFactor = 0.85 // Nearly instant for big jumps
-        } else if (distance > 50) {
-          lerpFactor = 0.75 // Very fast for medium distances
-        } else if (distance > 20) {
-          lerpFactor = 0.7 // Fast for small-medium distances
-        }
-        
-        const newX = lerp(cursor.current.x, cursor.target.x, lerpFactor)
-        const newY = lerp(cursor.current.y, cursor.target.y, lerpFactor)
 
-        // Lower threshold for more responsive updates
-        if (Math.abs(newX - cursor.current.x) > 0.05 || Math.abs(newY - cursor.current.y) > 0.05) {
+        // Snap when very close to avoid micro-jitter
+        if (distance < 0.75) {
+          cursor.current.x = cursor.target.x
+          cursor.current.y = cursor.target.y
+        } else {
+          // AGGRESSIVE lerp factors for ultra-responsive feel
+          let lerpFactor = 0.6 // Base speed (increased from 0.4)
+          if (distance > 100) {
+            lerpFactor = 0.85 // Nearly instant for big jumps
+          } else if (distance > 50) {
+            lerpFactor = 0.75 // Very fast for medium distances
+          } else if (distance > 20) {
+            lerpFactor = 0.7 // Fast for small-medium distances
+          } else {
+            lerpFactor = 0.5 // Slightly lower near target to reduce overshoot
+          }
+
+          const newX = lerp(cursor.current.x, cursor.target.x, lerpFactor)
+          const newY = lerp(cursor.current.y, cursor.target.y, lerpFactor)
           cursor.current.x = newX
           cursor.current.y = newY
-          
-          const children = cursor.group.getChildren()
-          const dot = children[0] as Konva.Circle
-          const labelBg = children[1] as Konva.Rect
-          const labelText = children[2] as Konva.Text
-
-          dot.position({ x: newX, y: newY })
-          labelBg.position({ x: newX + 10, y: newY - 26 })
-          labelText.position({ x: newX + 16, y: newY - 22 })
-
-          needsRedraw = true
         }
+
+        const children = cursor.group.getChildren()
+        const dot = children[0] as Konva.Circle
+        const labelBg = children[1] as Konva.Rect
+        const labelText = children[2] as Konva.Text
+
+        // Convert content-space current position to stage-space for drawing
+        const stagePt = contentToStage({ x: cursor.current.x, y: cursor.current.y })
+        dot.position({ x: stagePt.x, y: stagePt.y })
+        labelBg.position({ x: stagePt.x + 10, y: stagePt.y - 26 })
+        labelText.position({ x: stagePt.x + 16, y: stagePt.y - 22 })
+
+        needsRedraw = true
       })
 
       if (needsRedraw) {
@@ -279,30 +311,50 @@ export function CanvasStage({ canvasId }: { canvasId: string }) {
       anim.stop()
       Object.values(cursorsDataRef.current).forEach(cursor => cursor.group?.destroy())
     }
-  }, [])
+  }, [contentToStage])
 
   // Broadcast cursor position on mouse move - OPTIMIZED FOR 30FPS
   useEffect(() => {
     let lastPos = { x: 0, y: 0 }
     const minDelta = 3 // Slightly increased to reduce unnecessary updates
-    const tickMs = 33 // ~30fps (optimal balance: responsive + low bandwidth)
+    let baseTickMs = 33 // ~30fps (optimal balance: responsive + low bandwidth)
     let lastTick = 0
-    
+
+    // Adaptive burst mode when pointer moves fast
+    let burstUntil = 0
+    const velocityThreshold = 300 // px/sec
+    let lastTime = performance.now()
+
     const handleMove = () => {
       const now = performance.now()
+      const tickMs = now < burstUntil ? 16 : baseTickMs
       if (now - lastTick < tickMs) return
       lastTick = now
       if (document.hidden) return
-      
-      const pos = stageRef.current?.getPointerPosition()
-      if (!pos) return
-      
-      const dx = Math.abs(pos.x - lastPos.x)
-      const dy = Math.abs(pos.y - lastPos.y)
-      if (dx < minDelta && dy < minDelta) return
-      
-      lastPos = { x: pos.x, y: pos.y }
-      trackCursor(pos.x, pos.y)
+
+      const stage = stageRef.current?.getStage()
+      const raw = stage?.getPointerPosition()
+      if (!stage || !raw) return
+
+      // Map to content coordinates (inverse stage transform)
+      const transform = stage.getAbsoluteTransform().copy()
+      transform.invert()
+      const content = transform.point(raw)
+
+      const dx = content.x - lastPos.x
+      const dy = content.y - lastPos.y
+      const dist = Math.hypot(dx, dy)
+      const dt = Math.max(1, now - lastTime)
+      const velocity = (dist * 1000) / dt // px/sec
+
+      if (dist < minDelta) return
+
+      // Enable burst mode briefly on high velocity
+      if (velocity > velocityThreshold) burstUntil = now + 250
+
+      lastPos = { x: content.x, y: content.y }
+      lastTime = now
+      trackCursor(content.x, content.y)
     }
 
     const stage = stageRef.current?.getStage()
