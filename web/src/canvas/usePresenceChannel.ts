@@ -23,7 +23,8 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
   const myNameRef = useRef<string>('User')
   const myColorRef = useRef<string>('#ef4444')
   const channelRef = useRef<any>(null)
-  const lastMetadataBroadcastRef = useRef<{ name: string; color: string }>({ name: '', color: '' })
+  const lastMetadataBroadcastRef = useRef<{ name: string; color: string; editingIds?: string[] }>({ name: '', color: '' })
+  const myEditingIdsRef = useRef<string[]>([])
 
   // Method to update session settings (defined early for use in effects)
   const updateSessionSettings = useCallback((name: string, color: string) => {
@@ -38,10 +39,11 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
         name: name,
         color: color,
         avatarUrl: undefined,
+        editingIds: myEditingIdsRef.current,
         t: Date.now()
       })
       // Update metadata tracking so next cursor move includes it too
-      lastMetadataBroadcastRef.current = { name, color }
+      lastMetadataBroadcastRef.current = { name, color, editingIds: myEditingIdsRef.current }
     }
   }, [])
 
@@ -94,7 +96,8 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
           status: 'online',
           color: latest.color || myColorRef.current,
           cursorX: latest.x,
-          cursorY: latest.y
+          cursorY: latest.y,
+          editingIds: latest.editingIds
         })
       })
 
@@ -150,7 +153,7 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
         })
         
         // Set last metadata so we know what we broadcasted
-        lastMetadataBroadcastRef.current = { name: displayName, color: myColorRef.current }
+        lastMetadataBroadcastRef.current = { name: displayName, color: myColorRef.current, editingIds: myEditingIdsRef.current }
       }
     })
 
@@ -197,10 +200,11 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
       }
 
       // Only include metadata if it changed (reduces payload by 50%)
-      const currentMetadata = { name: myNameRef.current, color: myColorRef.current }
+      const currentMetadata = { name: myNameRef.current, color: myColorRef.current, editingIds: myEditingIdsRef.current }
       const metadataChanged =
         lastMetadataBroadcastRef.current.name !== currentMetadata.name ||
-        lastMetadataBroadcastRef.current.color !== currentMetadata.color
+        lastMetadataBroadcastRef.current.color !== currentMetadata.color ||
+        JSON.stringify(lastMetadataBroadcastRef.current.editingIds || []) !== JSON.stringify(currentMetadata.editingIds || [])
 
       if (metadataChanged) {
         // Full update with metadata
@@ -209,6 +213,7 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
           y,
           name: currentMetadata.name,
           color: currentMetadata.color,
+          editingIds: currentMetadata.editingIds,
           t: now
         })
         lastMetadataBroadcastRef.current = currentMetadata
@@ -224,6 +229,9 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
       // Update tracking refs
       lastBroadcastPos.current = { x, y }
       lastBroadcastTime.current = now
+    },
+    setEditingIds: (ids: string[]) => {
+      myEditingIdsRef.current = ids
     },
     updateSessionSettings,
     myId: myIdRef.current,

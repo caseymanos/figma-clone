@@ -61,6 +61,7 @@ export interface AITools {
 }
 
 async function updateObject(id: string, patch: Record<string, unknown>): Promise<void> {
+  // AI paths may not know version; fallback to direct update to avoid conflicts
   const { error } = await supabase.from('objects').update(patch).eq('id', id)
   if (error) throw error
 }

@@ -1,9 +1,11 @@
 import { Stage, Layer, Rect, Circle, Text, Transformer, Line } from 'react-konva'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { updateObjectOptimistic, updateManyPositionsOptimistic } from './api'
 import { useCanvasState, useToolState } from './state'
 import type { Tool } from './state'
 import { usePresenceChannel } from './usePresenceChannel'
+import { usePresenceState } from './presenceState'
 import { useSelection } from './selection'
 import { useKeyboardShortcuts } from './useKeyboardShortcuts'
 import { TextEditor } from '../components/TextEditor'
@@ -11,6 +13,7 @@ import { BottomToolbar } from '../components/BottomToolbar'
 import { createSmoothedCursor, updateSmoothedCursor, animateCursor, stageToContent } from './cursorSmoothing'
 import type { SmoothedCursor } from './cursorSmoothing'
 import Konva from 'konva'
+import { trackConflict } from '../lib/metrics'
 
 function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
   let last = 0
@@ -29,6 +32,57 @@ function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
       }, remaining)
     }
   } as T
+}
+
+// Ramer-Douglas-Peucker algorithm for path simplification
+function simplifyPath(points: Array<{ x: number; y: number }>, tolerance: number = 2): Array<{ x: number; y: number }> {
+  if (points.length <= 2) return points
+
+  // Find the point with the maximum distance from line between start and end
+  let maxDistance = 0
+  let index = 0
+  const start = points[0]
+  const end = points[points.length - 1]
+
+  for (let i = 1; i < points.length - 1; i++) {
+    const distance = perpendicularDistance(points[i], start, end)
+    if (distance > maxDistance) {
+      maxDistance = distance
+      index = i
+    }
+  }
+
+  // If max distance is greater than tolerance, recursively simplify
+  if (maxDistance > tolerance) {
+    const left = simplifyPath(points.slice(0, index + 1), tolerance)
+    const right = simplifyPath(points.slice(index), tolerance)
+    return [...left.slice(0, -1), ...right]
+  } else {
+    return [start, end]
+  }
+}
+
+// Calculate perpendicular distance from point to line
+function perpendicularDistance(
+  point: { x: number; y: number },
+  lineStart: { x: number; y: number },
+  lineEnd: { x: number; y: number }
+): number {
+  const dx = lineEnd.x - lineStart.x
+  const dy = lineEnd.y - lineStart.y
+  const mag = Math.sqrt(dx * dx + dy * dy)
+
+  if (mag === 0) {
+    return Math.sqrt(
+      Math.pow(point.x - lineStart.x, 2) + Math.pow(point.y - lineStart.y, 2)
+    )
+  }
+
+  const u = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / (mag * mag)
+  const closestX = lineStart.x + u * dx
+  const closestY = lineStart.y + u * dy
+
+  return Math.sqrt(Math.pow(point.x - closestX, 2) + Math.pow(point.y - closestY, 2))
 }
 
 export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; selectedColor?: string }) {
@@ -78,6 +132,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
 
   // Multi-select drag tracking
   const dragStartPositionsRef = useRef<Record<string, { x: number; y: number }>>({})
+  const myUserIdRef = useRef<string | null>(null)
 
   // Cursor data store - ref-based, never triggers React renders
   const cursorsDataRef = useRef<Record<string, {
@@ -89,6 +144,11 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
 
   // Load initial objects and subscribe to changes
   useEffect(() => {
+    // Resolve current auth user id for author-aware filtering
+    supabase.auth.getUser().then(({ data }) => {
+      myUserIdRef.current = data.user?.id || null
+    })
+
     const channel = supabase
       .channel(`objects:${canvasId}`)
       .on(
@@ -97,6 +157,8 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         (payload: any) => {
           if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
             const r = payload.new
+            // Ignore own updates to prevent flicker
+            if (r.updated_by && myUserIdRef.current && r.updated_by === myUserIdRef.current) return
             pendingObjectsRef.current.push({
               id: r.id,
               type: r.type,
@@ -110,7 +172,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
               stroke_width: r.stroke_width,
               text_content: r.text_content,
               points: r.points,
+              updatedBy: r.updated_by,
               updatedAt: r.updated_at,
+              version: r.version,
             })
             if (objectsRafRef.current == null) {
               objectsRafRef.current = requestAnimationFrame(() => {
@@ -146,7 +210,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
           stroke_width: r.stroke_width,
           text_content: r.text_content,
           points: r.points,
+          updatedBy: r.updated_by,
           updatedAt: r.updated_at,
+          version: r.version,
         }))
         upsertMany(batch)
       })
@@ -252,7 +318,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   }, [])
 
   // Get presence hook with trackCursor and myId
-  const { trackCursor, myId } = usePresenceChannel({
+  const { trackCursor, myId, setEditingIds } = usePresenceChannel({
     canvasId,
     onCursorUpdate: handleCursorUpdate
   })
@@ -430,6 +496,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         }
       }
     })
+
+    // Broadcast soft-locks for selected objects
+    setEditingIds(selectedIds)
   }, [selectedIds])
 
   // Move all selected shapes together during drag
@@ -464,7 +533,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   }, [selectedIds])
 
   // Event delegation for object dragging
-  const onLayerDragEnd = useCallback((e: any) => {
+  const onLayerDragEnd = useCallback(async (e: any) => {
     const shape = e.target
     if (shape === objectLayerRef.current) return
 
@@ -493,10 +562,23 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         }
       })
 
-      // Batch broadcast to other users
-      updates.forEach(update => {
-        supabase.from('objects').update({ x: update.x, y: update.y }).eq('id', update.id).then()
-      })
+      // Build optimistic batch with expected versions
+      const versioned = updates
+        .map(u => {
+          const obj = (objectsRecord as any)[u.id]
+          return obj && obj.version != null ? { id: u.id, expected_version: obj.version, x: u.x, y: u.y } : null
+        })
+        .filter(Boolean) as Array<{ id: string; expected_version: number; x: number; y: number }>
+
+      try {
+        await updateManyPositionsOptimistic(versioned)
+      } catch (err: any) {
+        trackConflict('conflict_detected', { type: 'batch', count: versioned.length })
+        // On conflict, fallback to regular updates (rare) or refresh
+        versioned.forEach(v => {
+          supabase.from('objects').update({ x: v.x, y: v.y }).eq('id', v.id).then()
+        })
+      }
     } else {
       // Single shape drag
       const finalPos = { x: shape.x(), y: shape.y() }
@@ -510,16 +592,34 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         height: shape.height()
       })
 
-      // Broadcast to other users
-      supabase.from('objects').update({ x: finalPos.x, y: finalPos.y }).eq('id', id).then()
+      // Optimistic single update
+      const obj = (objectsRecord as any)[id]
+      try {
+        await updateObjectOptimistic(id, obj?.version, { x: finalPos.x, y: finalPos.y } as any)
+      } catch (err: any) {
+        if (err?.message === 'version_conflict' && err.latest) {
+          // Merge by applying our delta from prev to latest if safe; fallback to LWW
+          const dx = finalPos.x - (obj?.x ?? finalPos.x)
+          const dy = finalPos.y - (obj?.y ?? finalPos.y)
+          const merged = { x: (err.latest.x as number) + dx, y: (err.latest.y as number) + dy }
+          await supabase.from('objects').update(merged).eq('id', id)
+          trackConflict('merge_applied', { id })
+        } else {
+          // Fallback regular update
+          await supabase.from('objects').update({ x: finalPos.x, y: finalPos.y }).eq('id', id)
+          trackConflict('merge_failed', { id })
+        }
+      }
     }
 
     // Clear drag start positions
     dragStartPositionsRef.current = {}
+    // Release soft-locks
+    setEditingIds([])
   }, [upsertObject, selectedIds])
 
   // Handle transform (resize/rotate) end
-  const onTransformEnd = useCallback((e: any) => {
+  const onTransformEnd = useCallback(async (e: any) => {
     const node = e.target
     const id = node.attrs.id
     if (!id) return
@@ -543,58 +643,27 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     // Update local state
     upsertObject(updates)
 
-    // Broadcast to database
-    supabase.from('objects').update({
-      x: updates.x,
-      y: updates.y,
-      width: updates.width,
-      height: updates.height,
-      rotation: updates.rotation,
-    }).eq('id', id).then()
+    // Optimistic single update
+    const obj = (objectsRecord as any)[id]
+    try {
+      await updateObjectOptimistic(id, obj?.version, {
+        x: updates.x,
+        y: updates.y,
+        width: updates.width,
+        height: updates.height,
+        rotation: updates.rotation,
+      } as any)
+    } catch (err: any) {
+      await supabase.from('objects').update({
+        x: updates.x,
+        y: updates.y,
+        width: updates.width,
+        height: updates.height,
+        rotation: updates.rotation,
+      }).eq('id', id)
+      trackConflict('merge_failed', { id })
+    }
   }, [upsertObject])
-
-  const finishPenPath = useCallback(async () => {
-    if (penPoints.length < 2) {
-      // Need at least 2 points to create a line
-      setPenPoints([])
-      setIsPenDrawing(false)
-      return
-    }
-
-    // Calculate bounding box for the path
-    const xs = penPoints.map(p => p.x)
-    const ys = penPoints.map(p => p.y)
-    const minX = Math.min(...xs)
-    const minY = Math.min(...ys)
-    const maxX = Math.max(...xs)
-    const maxY = Math.max(...ys)
-
-    const lineData = {
-      canvas_id: canvasId,
-      type: 'line',
-      x: minX,
-      y: minY,
-      width: maxX - minX,
-      height: maxY - minY,
-      points: penPoints,
-      stroke: selectedColor || '#4f46e5',
-      stroke_width: 2,
-      fill: 'transparent',
-    }
-
-    const { data, error } = await supabase.from('objects').insert(lineData).select()
-
-    if (error) {
-      console.error('Failed to add line:', error)
-    } else if (data && data[0]) {
-      setSelectedIds([data[0].id])
-    }
-
-    // Reset pen state
-    setPenPoints([])
-    setIsPenDrawing(false)
-    setActiveTool('select')
-  }, [penPoints, canvasId, selectedColor, setSelectedIds, setActiveTool])
 
   const createShapeAtPosition = async (type: 'rect' | 'circle' | 'text' | 'frame', x: number, y: number, width: number, height: number) => {
     let shapeData: any = {
@@ -681,7 +750,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       return
     }
 
-    // Pen tool: add points on click
+    // Pen tool: start freehand drawing
     if (activeTool === 'pen') {
       const stage = stageRef.current
       const pos = stage.getPointerPosition()
@@ -690,8 +759,8 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       // Convert to content space
       const contentPos = stageToContent(pos.x, pos.y, stage.x(), stage.y(), stage.scaleX())
 
-      setPenPoints(prev => [...prev, contentPos])
       setIsPenDrawing(true)
+      setPenPoints([contentPos])
       return
     }
 
@@ -736,6 +805,19 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       return
     }
 
+    // Handle pen tool freehand drawing
+    if (isPenDrawing && penPoints.length > 0) {
+      const lastPoint = penPoints[penPoints.length - 1]
+      // Only add point if it's far enough from the last one (distance threshold)
+      const distance = Math.sqrt(
+        Math.pow(contentPos.x - lastPoint.x, 2) + Math.pow(contentPos.y - lastPoint.y, 2)
+      )
+      if (distance > 3) {
+        setPenPoints(prev => [...prev, contentPos])
+      }
+      return
+    }
+
     // Handle shape drawing
     if (!isDrawing || !newShape) return
 
@@ -763,6 +845,47 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   }
 
   const onStageMouseUp = async () => {
+    // Handle pen tool completion - auto-finish on mouse up
+    if (isPenDrawing && penPoints.length >= 2) {
+      // Simplify the path using Ramer-Douglas-Peucker
+      const simplified = simplifyPath(penPoints, 2)
+
+      // Calculate bounding box for the path
+      const xs = simplified.map(p => p.x)
+      const ys = simplified.map(p => p.y)
+      const minX = Math.min(...xs)
+      const minY = Math.min(...ys)
+      const maxX = Math.max(...xs)
+      const maxY = Math.max(...ys)
+
+      const lineData = {
+        canvas_id: canvasId,
+        type: 'line',
+        x: minX,
+        y: minY,
+        width: maxX - minX || 1,
+        height: maxY - minY || 1,
+        points: simplified,
+        stroke: selectedColor || '#4f46e5',
+        stroke_width: 2,
+        fill: 'transparent',
+      }
+
+      const { data, error } = await supabase.from('objects').insert(lineData).select()
+
+      if (error) {
+        console.error('Failed to add line:', error)
+      } else if (data && data[0]) {
+        setSelectedIds([data[0].id])
+      }
+
+      // Reset pen state
+      setPenPoints([])
+      setIsPenDrawing(false)
+      setActiveTool('select')
+      return
+    }
+
     // Handle selection box completion
     if (isSelecting && selectionBox) {
       // Only process if the box has meaningful size (more than 5px)
@@ -968,23 +1091,6 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     upsertObject,
   })
 
-  // Pen tool: finish path on Escape or Enter
-  useEffect(() => {
-    if (!isPenDrawing) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-
-      if (e.key === 'Escape' || e.key === 'Enter') {
-        e.preventDefault()
-        finishPenPath()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isPenDrawing, finishPenPath])
-
   // Spacebar pan functionality
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1040,6 +1146,15 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     }
   }
 
+  // Compute locked object ids from presence (others' editingIds)
+  const presenceUsers = usePresenceState((s) => s.users)
+  const lockedIds = new Set<string>()
+  Object.entries(presenceUsers).forEach(([pid, user]) => {
+    if (pid !== myId && user.editingIds) {
+      user.editingIds.forEach((id) => lockedIds.add(id))
+    }
+  })
+
   return (
     <div style={{ height: '100%', width: '100%', position: 'relative', cursor: getCursorStyle() }}>
       <Stage
@@ -1057,10 +1172,11 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       >
         <Layer ref={objectLayerRef} onDragStart={onLayerDragStart} onDragMove={onLayerDragMove} onDragEnd={onLayerDragEnd}>
           {objects.map((o) => {
+            const isLocked = lockedIds.has(o.id)
             const commonProps = {
               id: o.id,
               key: o.id,
-              draggable: activeTool === 'select',
+              draggable: activeTool === 'select' && !isLocked,
               onClick: onShapeClick,
               onDblClick: onShapeDoubleClick,
               rotation: o.rotation || 0,
@@ -1083,8 +1199,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
                   y={o.y}
                   radius={(o.width || 80) / 2}
                   fill={o.fill || '#4f46e5'}
-                  stroke={isSelected ? '#10b981' : undefined}
-                  strokeWidth={isSelected ? 3 : 0}
+                  stroke={isSelected ? '#10b981' : isLocked ? '#f59e0b' : undefined}
+                  strokeWidth={isSelected ? 3 : isLocked ? 2 : 0}
+                  dash={isLocked && !isSelected ? [6, 4] : undefined}
                 />
               )
             } else if (o.type === 'text') {
@@ -1097,8 +1214,8 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
                   text={o.text_content || 'Text'}
                   fontSize={20}
                   fill={o.fill || '#000000'}
-                  stroke={isSelected ? '#10b981' : undefined}
-                  strokeWidth={isSelected ? 2 : 0}
+                  stroke={isSelected ? '#10b981' : isLocked ? '#f59e0b' : undefined}
+                  strokeWidth={isSelected ? 2 : isLocked ? 2 : 0}
                 />
               )
             } else if (o.type === 'frame') {
@@ -1111,8 +1228,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
                   width={o.width}
                   height={o.height}
                   fill="transparent"
-                  stroke={isSelected ? '#10b981' : (o.stroke || '#8b5cf6')}
-                  strokeWidth={isSelected ? 3 : (o.stroke_width || 2)}
+                  stroke={isSelected ? '#10b981' : isLocked ? '#f59e0b' : (o.stroke || '#8b5cf6')}
+                  strokeWidth={isSelected ? 3 : isLocked ? 2 : (o.stroke_width || 2)}
+                  dash={isLocked && !isSelected ? [6, 4] : undefined}
                 />
               )
             } else if (o.type === 'line' && o.points) {
@@ -1121,11 +1239,12 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
                 <Line
                   {...commonProps}
                   points={o.points.flatMap(p => [p.x, p.y])}
-                  stroke={isSelected ? '#10b981' : (o.stroke || '#4f46e5')}
-                  strokeWidth={isSelected ? 3 : (o.stroke_width || 2)}
+                  stroke={isSelected ? '#10b981' : isLocked ? '#f59e0b' : (o.stroke || '#4f46e5')}
+                  strokeWidth={isSelected ? 3 : isLocked ? 2 : (o.stroke_width || 2)}
                   lineCap="round"
                   lineJoin="round"
                   fill={undefined}
+                  dash={isLocked && !isSelected ? [6, 4] : undefined}
                 />
               )
             } else {
@@ -1138,8 +1257,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
                   width={o.width}
                   height={o.height}
                   fill={o.fill || '#4f46e5'}
-                  stroke={isSelected ? '#10b981' : undefined}
-                  strokeWidth={isSelected ? 3 : 0}
+                  stroke={isSelected ? '#10b981' : isLocked ? '#f59e0b' : undefined}
+                  strokeWidth={isSelected ? 3 : isLocked ? 2 : 0}
+                  dash={isLocked && !isSelected ? [6, 4] : undefined}
                 />
               )
             }
@@ -1160,32 +1280,16 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
             />
           )}
 
-          {/* Pen tool preview - show path being drawn */}
-          {isPenDrawing && penPoints.length > 0 && (
-            <>
-              {/* Draw the line connecting points */}
-              {penPoints.length > 1 && (
-                <Line
-                  points={penPoints.flatMap(p => [p.x, p.y])}
-                  stroke={selectedColor || '#4f46e5'}
-                  strokeWidth={2}
-                  lineCap="round"
-                  lineJoin="round"
-                  listening={false}
-                />
-              )}
-              {/* Draw circles at each point */}
-              {penPoints.map((point, i) => (
-                <Circle
-                  key={i}
-                  x={point.x}
-                  y={point.y}
-                  radius={4}
-                  fill={selectedColor || '#4f46e5'}
-                  listening={false}
-                />
-              ))}
-            </>
+          {/* Pen tool preview - show smooth path being drawn */}
+          {isPenDrawing && penPoints.length > 1 && (
+            <Line
+              points={penPoints.flatMap(p => [p.x, p.y])}
+              stroke={selectedColor || '#4f46e5'}
+              strokeWidth={2}
+              lineCap="round"
+              lineJoin="round"
+              listening={false}
+            />
           )}
 
           {/* Preview shape during creation */}

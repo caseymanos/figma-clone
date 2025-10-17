@@ -30,7 +30,7 @@ create table if not exists public.canvas_members (
 create table if not exists public.objects (
   id uuid primary key default gen_random_uuid(),
   canvas_id uuid references public.canvases(id) on delete cascade,
-  type text check (type in ('rect','circle','text')) not null,
+  type text check (type in ('rect','circle','text','frame','line')) not null,
   x numeric not null,
   y numeric not null,
   width numeric,
@@ -38,10 +38,14 @@ create table if not exists public.objects (
   rotation numeric default 0,
   fill text,
   stroke text,
+  stroke_width numeric,
   text_content text,
+  points jsonb,
   z_index int default 0,
   updated_by uuid references auth.users(id),
-  updated_at timestamptz default now()
+  updated_at timestamptz default now(),
+  -- Version for optimistic concurrency control
+  version int not null default 1
 );
 
 alter table public.profiles enable row level security;
@@ -103,4 +107,102 @@ using ( bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[
 create policy "Users can delete their own avatars"
 on storage.objects for delete
 using ( bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1] );
+
+-- =========================================================
+-- Concurrency and RPCs for objects
+-- =========================================================
+
+-- Ensure updated_at is set on every UPDATE
+create or replace function public.trigger_set_timestamp()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_trigger where tgname = 'set_timestamp_objects'
+  ) then
+    create trigger set_timestamp_objects
+    before update on public.objects
+    for each row execute procedure public.trigger_set_timestamp();
+  end if;
+end$$;
+
+-- Bump version and set updated_by on every UPDATE
+create or replace function public.trigger_bump_version()
+returns trigger as $$
+begin
+  new.version = old.version + 1;
+  if new.updated_by is null then
+    new.updated_by = auth.uid();
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_trigger where tgname = 'bump_version_objects'
+  ) then
+    create trigger bump_version_objects
+    before update on public.objects
+    for each row execute procedure public.trigger_bump_version();
+  end if;
+end$$;
+
+-- Optimistic single-object update: only update if version matches
+create or replace function public.rpc_update_object_if_unmodified(
+  p_id uuid,
+  p_expected_version int,
+  p_patch jsonb
+)
+returns setof public.objects
+language plpgsql
+security definer
+as $$
+begin
+  return query
+  update public.objects o
+  set x = coalesce((p_patch->>'x')::numeric, o.x),
+      y = coalesce((p_patch->>'y')::numeric, o.y),
+      width = coalesce((p_patch->>'width')::numeric, o.width),
+      height = coalesce((p_patch->>'height')::numeric, o.height),
+      rotation = coalesce((p_patch->>'rotation')::numeric, o.rotation),
+      fill = coalesce(p_patch->>'fill', o.fill),
+      text_content = coalesce(p_patch->>'text_content', o.text_content)
+  where o.id = p_id and o.version = p_expected_version
+  returning *;
+end;
+$$;
+
+-- Atomic batch position updates for multi-select drag/align
+create or replace function public.rpc_update_many_positions(
+  p_updates jsonb
+)
+returns setof public.objects
+language plpgsql
+security definer
+as $$
+begin
+  return query
+  with u as (
+    select (x->>'id')::uuid as id,
+           (x->>'expected_version')::int as expected_version,
+           (x->>'x')::numeric as x,
+           (x->>'y')::numeric as y
+    from jsonb_array_elements(p_updates) as x
+  )
+  update public.objects o
+  set x = coalesce(u.x, o.x),
+      y = coalesce(u.y, o.y)
+  from u
+  where o.id = u.id and o.version = u.expected_version
+  returning o.*;
+end;
+$$;
 

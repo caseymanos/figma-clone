@@ -8,6 +8,7 @@ export interface PresenceUser {
   color: string
   cursorX?: number
   cursorY?: number
+  editingIds?: string[]
 }
 
 interface PresenceState {

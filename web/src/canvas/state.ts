@@ -13,6 +13,9 @@ export type ObjectRecord = {
   stroke_width?: number
   text_content?: string
   points?: Array<{ x: number; y: number }> // For line/pen tool
+  // Server-authoritative fields for conflict resolution
+  version?: number
+  updatedBy?: string
   updatedAt?: string
 }
 
@@ -27,11 +30,15 @@ export const useCanvasState = create<CanvasState>((set) => ({
   objects: {},
   upsertObject: (o) => set((s) => {
     const prev = s.objects[o.id]
-    // Last-write-wins check for remote updates
-    if (prev && prev.updatedAt && o.updatedAt) {
-      const incoming = Date.parse(o.updatedAt)
-      const current = Date.parse(prev.updatedAt)
-      if (incoming < current) return s
+    // Prefer higher version; fallback to updatedAt LWW for remote updates
+    if (prev && (o.version != null || o.updatedAt)) {
+      if (prev.version != null && o.version != null) {
+        if (o.version < prev.version) return s
+      } else if (prev.updatedAt && o.updatedAt) {
+        const incoming = Date.parse(o.updatedAt)
+        const current = Date.parse(prev.updatedAt)
+        if (incoming < current) return s
+      }
     }
     // Skip update if values haven't changed (prevents drag loops)
     if (prev && prev.x === o.x && prev.y === o.y && prev.width === o.width && prev.height === o.height && prev.rotation === o.rotation && prev.fill === o.fill && prev.stroke === o.stroke && prev.stroke_width === o.stroke_width) {
@@ -44,10 +51,14 @@ export const useCanvasState = create<CanvasState>((set) => ({
     const nextObjects = { ...s.objects }
     for (const o of incoming) {
       const prev = nextObjects[o.id]
-      if (prev && prev.updatedAt && o.updatedAt) {
-        const inc = Date.parse(o.updatedAt)
-        const cur = Date.parse(prev.updatedAt)
-        if (inc < cur) continue
+      if (prev && (o.version != null || o.updatedAt)) {
+        if (prev.version != null && o.version != null) {
+          if (o.version < prev.version) continue
+        } else if (prev.updatedAt && o.updatedAt) {
+          const inc = Date.parse(o.updatedAt)
+          const cur = Date.parse(prev.updatedAt)
+          if (inc < cur) continue
+        }
       }
       if (
         prev &&
