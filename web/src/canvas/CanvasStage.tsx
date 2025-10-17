@@ -65,6 +65,10 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   const [penPoints, setPenPoints] = useState<Array<{ x: number; y: number }>>([])
   const [isPenDrawing, setIsPenDrawing] = useState(false)
 
+  // Selection box state (marquee selection)
+  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; x: number; y: number; width: number; height: number } | null>(null)
+  const [isSelecting, setIsSelecting] = useState(false)
+
   const pendingObjectsRef = useRef<Array<any>>([])
   const objectsRafRef = useRef<number | null>(null)
 
@@ -656,9 +660,24 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       return
     }
 
-    // Clear selection when clicking empty canvas in select mode
+    // Select mode: start selection box (marquee selection)
     if (activeTool === 'select') {
-      setSelectedIds([])
+      const stage = stageRef.current
+      const pos = stage.getPointerPosition()
+      if (!pos) return
+
+      // Convert to content space
+      const contentPos = stageToContent(pos.x, pos.y, stage.x(), stage.y(), stage.scaleX())
+
+      setIsSelecting(true)
+      setSelectionBox({
+        startX: contentPos.x,
+        startY: contentPos.y,
+        x: contentPos.x,
+        y: contentPos.y,
+        width: 0,
+        height: 0
+      })
       return
     }
 
@@ -691,14 +710,34 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   }
 
   const onStageMouseMove = () => {
-    if (!isDrawing || !newShape) return
-
     const stage = stageRef.current
     const pos = stage?.getPointerPosition()
     if (!pos) return
 
     // Convert to content space
     const contentPos = stageToContent(pos.x, pos.y, stage.x(), stage.y(), stage.scaleX())
+
+    // Handle selection box dragging
+    if (isSelecting && selectionBox) {
+      const width = contentPos.x - selectionBox.startX
+      const height = contentPos.y - selectionBox.startY
+
+      // Calculate actual position (adjust if drawn backwards)
+      const x = width < 0 ? selectionBox.startX + width : selectionBox.startX
+      const y = height < 0 ? selectionBox.startY + height : selectionBox.startY
+
+      setSelectionBox({
+        ...selectionBox,
+        x,
+        y,
+        width: Math.abs(width),
+        height: Math.abs(height)
+      })
+      return
+    }
+
+    // Handle shape drawing
+    if (!isDrawing || !newShape) return
 
     let width = contentPos.x - newShape.startX
     let height = contentPos.y - newShape.startY
@@ -724,6 +763,45 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   }
 
   const onStageMouseUp = async () => {
+    // Handle selection box completion
+    if (isSelecting && selectionBox) {
+      // Only process if the box has meaningful size (more than 5px)
+      if (selectionBox.width > 5 || selectionBox.height > 5) {
+        // Find all objects that intersect with the selection box
+        const selectedObjects = objects.filter(obj => {
+          // Get object bounds
+          const objLeft = obj.x
+          const objRight = obj.x + obj.width
+          const objTop = obj.y
+          const objBottom = obj.y + obj.height
+
+          // Get selection box bounds
+          const boxLeft = selectionBox.x
+          const boxRight = selectionBox.x + selectionBox.width
+          const boxTop = selectionBox.y
+          const boxBottom = selectionBox.y + selectionBox.height
+
+          // Check for intersection
+          return !(
+            objRight < boxLeft ||
+            objLeft > boxRight ||
+            objBottom < boxTop ||
+            objTop > boxBottom
+          )
+        })
+
+        setSelectedIds(selectedObjects.map(obj => obj.id))
+      } else {
+        // Click without drag - clear selection
+        setSelectedIds([])
+      }
+
+      setIsSelecting(false)
+      setSelectionBox(null)
+      return
+    }
+
+    // Handle shape drawing
     if (!isDrawing || !newShape) return
 
     const stage = stageRef.current
@@ -731,14 +809,14 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     if (!pos) return
 
     const contentPos = stageToContent(pos.x, pos.y, stage.x(), stage.y(), stage.scaleX())
-    
+
     const width = contentPos.x - newShape.startX
     const height = contentPos.y - newShape.startY
 
     // For circles, use the larger dimension
     let finalWidth = Math.abs(width)
     let finalHeight = Math.abs(height)
-    
+
     if (newShape.type === 'circle') {
       const size = Math.max(finalWidth, finalHeight)
       finalWidth = size
@@ -1066,6 +1144,21 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
               )
             }
           })}
+
+          {/* Selection box preview (marquee selection) */}
+          {isSelecting && selectionBox && selectionBox.width > 0 && selectionBox.height > 0 && (
+            <Rect
+              x={selectionBox.x}
+              y={selectionBox.y}
+              width={selectionBox.width}
+              height={selectionBox.height}
+              fill="rgba(99, 102, 241, 0.1)"
+              stroke="#6366f1"
+              strokeWidth={1}
+              dash={[4, 4]}
+              listening={false}
+            />
+          )}
 
           {/* Pen tool preview - show path being drawn */}
           {isPenDrawing && penPoints.length > 0 && (
