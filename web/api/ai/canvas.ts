@@ -4,7 +4,7 @@ import { z } from 'zod'
 
 export const runtime = 'edge'
 
-// Tool definitions matching our canvas operations
+// Tool definitions for client-side execution (no execute functions for streamText)
 const tools = {
   createShape: tool({
     description: 'Create a new shape (rectangle, circle, or text) on the canvas at specified position with optional styling',
@@ -17,7 +17,6 @@ const tools = {
       color: z.string().optional().describe('Fill color as hex code like #4f46e5'),
       text: z.string().optional().describe('Text content when type is text'),
     }),
-    execute: async (params) => params, // Client handles actual execution
   }),
   
   moveShape: tool({
@@ -27,7 +26,6 @@ const tools = {
       x: z.number().describe('New X coordinate'),
       y: z.number().describe('New Y coordinate'),
     }),
-    execute: async (params) => params,
   }),
   
   resizeShape: tool({
@@ -37,7 +35,6 @@ const tools = {
       width: z.number().describe('New width in pixels'),
       height: z.number().describe('New height in pixels'),
     }),
-    execute: async (params) => params,
   }),
   
   rotateShape: tool({
@@ -46,7 +43,6 @@ const tools = {
       id: z.string().describe('Shape ID to rotate'),
       degrees: z.number().describe('Rotation angle in degrees (0-360)'),
     }),
-    execute: async (params) => params,
   }),
   
   arrangeRow: tool({
@@ -54,7 +50,6 @@ const tools = {
     parameters: z.object({
       spacing: z.number().default(16).describe('Spacing between shapes in pixels'),
     }),
-    execute: async (params) => params,
   }),
   
   arrangeGrid: tool({
@@ -64,7 +59,6 @@ const tools = {
       cols: z.number().describe('Number of columns'),
       gap: z.number().optional().describe('Gap between cells in pixels (default: 12)'),
     }),
-    execute: async (params) => params,
   }),
   
   distributeShapes: tool({
@@ -73,7 +67,6 @@ const tools = {
       axis: z.enum(['x', 'y']).describe('Axis to distribute along (x=horizontal, y=vertical)'),
       spacing: z.number().optional().describe('Optional fixed spacing between shapes'),
     }),
-    execute: async (params) => params,
   }),
   
   createLoginForm: tool({
@@ -82,7 +75,6 @@ const tools = {
       x: z.number().optional().describe('Starting X position (default: 100)'),
       y: z.number().optional().describe('Starting Y position (default: 100)'),
     }),
-    execute: async (params) => params,
   }),
 }
 
@@ -121,11 +113,10 @@ For complex requests like "login form", use the specialized pattern tools.`
       system: systemPrompt,
       prompt,
       tools,
-      maxSteps: 5, // Allow multi-step reasoning
     })
 
     // Return as a streaming response with tool calls
-    return result.toTextStreamResponse()
+    return result.toDataStreamResponse()
   } catch (error: any) {
     console.error('AI Canvas API Error:', error)
     return new Response(JSON.stringify({ error: error.message }), {
