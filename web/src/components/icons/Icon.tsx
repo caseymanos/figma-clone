@@ -1,5 +1,5 @@
 // SVG Icon Component Library - Figma-style icons
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactElement } from 'react'
 
 interface IconProps {
   name: string
@@ -18,7 +18,7 @@ export function Icon({ name, size = 16, color = 'currentColor', style, className
     ...style,
   }
 
-  const icons: Record<string, JSX.Element> = {
+  const icons: Record<string, ReactElement> = {
     // Navigation
     home: (
       <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
