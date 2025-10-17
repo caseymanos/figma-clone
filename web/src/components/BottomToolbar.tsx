@@ -2,12 +2,17 @@
 import type { CSSProperties } from 'react'
 import { Icon } from './icons/Icon'
 import { colors, typography, spacing, borderRadius, components, transitions, shadows, zIndex } from '../styles/design-tokens'
+import { useToolState } from '../canvas/state'
+import type { Tool } from '../canvas/state'
 
 interface BottomToolbarProps {
   onAddShape: (type: 'rect' | 'circle' | 'text') => void
+  onZoomIn?: () => void
+  onZoomOut?: () => void
 }
 
-export function BottomToolbar({ onAddShape }: BottomToolbarProps) {
+export function BottomToolbar({ onAddShape, onZoomIn, onZoomOut }: BottomToolbarProps) {
+  const { activeTool, setActiveTool } = useToolState()
   const toolbarStyle: CSSProperties = {
     position: 'fixed',
     bottom: spacing[4],
@@ -71,22 +76,35 @@ export function BottomToolbar({ onAddShape }: BottomToolbarProps) {
     icon: string,
     label: string,
     onClick: () => void,
-    shortcut?: string
+    shortcut?: string,
+    tool?: Tool
   ) => {
+    const isActive = tool && activeTool === tool
+    const activeStyle: CSSProperties = isActive
+      ? {
+          ...toolButtonStyle,
+          background: colors.primary[600],
+        }
+      : toolButtonStyle
+
     return (
       <button
         onClick={onClick}
         onMouseEnter={(e) => {
-          e.currentTarget.style.background = colors.gray[700]
+          if (!isActive) {
+            e.currentTarget.style.background = colors.gray[700]
+          }
           const tooltip = e.currentTarget.querySelector('.tooltip') as HTMLElement
           if (tooltip) tooltip.style.opacity = '1'
         }}
         onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'transparent'
+          if (!isActive) {
+            e.currentTarget.style.background = 'transparent'
+          }
           const tooltip = e.currentTarget.querySelector('.tooltip') as HTMLElement
           if (tooltip) tooltip.style.opacity = '0'
         }}
-        style={toolButtonStyle}
+        style={activeStyle}
         title={label}
       >
         <Icon name={icon} size={18} color={colors.text.inverse} />
@@ -102,26 +120,34 @@ export function BottomToolbar({ onAddShape }: BottomToolbarProps) {
     )
   }
 
+  const handleToolClick = (tool: Tool) => {
+    setActiveTool(tool)
+    // Auto-create shape when tool is selected
+    if (tool === 'rect' || tool === 'circle' || tool === 'text') {
+      onAddShape(tool as 'rect' | 'circle' | 'text')
+    }
+  }
+
   return (
     <div style={toolbarStyle}>
       {/* Selection tools */}
-      {createToolButton('cursor', 'Move', () => {}, 'V')}
-      {createToolButton('hand', 'Pan', () => {}, 'H')}
+      {createToolButton('cursor', 'Move', () => handleToolClick('select'), 'V', 'select')}
+      {createToolButton('hand', 'Pan', () => handleToolClick('pan'), 'H', 'pan')}
 
       <div style={dividerStyle} />
 
       {/* Shape tools */}
-      {createToolButton('rectangle', 'Rectangle', () => onAddShape('rect'), 'R')}
-      {createToolButton('circle', 'Circle', () => onAddShape('circle'), 'O')}
-      {createToolButton('text', 'Text', () => onAddShape('text'), 'T')}
-      {createToolButton('frame', 'Frame', () => {}, 'F')}
-      {createToolButton('pen', 'Pen', () => {}, 'P')}
+      {createToolButton('rectangle', 'Rectangle', () => handleToolClick('rect'), 'R', 'rect')}
+      {createToolButton('circle', 'Circle', () => handleToolClick('circle'), 'O', 'circle')}
+      {createToolButton('text', 'Text', () => handleToolClick('text'), 'T', 'text')}
+      {createToolButton('frame', 'Frame', () => handleToolClick('frame'), 'F', 'frame')}
+      {createToolButton('pen', 'Pen', () => handleToolClick('pen'), 'P', 'pen')}
 
       <div style={dividerStyle} />
 
       {/* View tools */}
-      {createToolButton('zoomIn', 'Zoom In', () => {}, '+')}
-      {createToolButton('zoomOut', 'Zoom Out', () => {}, '-')}
+      {createToolButton('zoomIn', 'Zoom In', () => onZoomIn?.(), '+')}
+      {createToolButton('zoomOut', 'Zoom Out', () => onZoomOut?.(), '-')}
     </div>
   )
 }
