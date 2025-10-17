@@ -1,9 +1,12 @@
-import { Stage, Layer, Rect, Circle, Text } from 'react-konva'
+import { Stage, Layer, Rect, Circle, Text, Transformer } from 'react-konva'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useCanvasState } from './state'
 import { usePresenceChannel } from './usePresenceChannel'
 import { useSelection } from './selection'
+import { useKeyboardShortcuts } from './useKeyboardShortcuts'
+import { TextEditor } from '../components/TextEditor'
+import { BottomToolbar } from '../components/BottomToolbar'
 import Konva from 'konva'
 
 function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
@@ -33,7 +36,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   const stageRef = useRef<any>(null)
   const objectLayerRef = useRef<any>(null)
   const cursorLayerRef = useRef<any>(null)
-  
+  const transformerRef = useRef<any>(null)
+  const shapeRefsMap = useRef<Map<string, any>>(new Map())
+
   const [scale, setScale] = useState(1)
   const setScaleIfChanged = (next: number) => {
     setScale((prev) => (prev === next ? prev : next))
@@ -49,6 +54,8 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   const toggleId = useSelection((s) => s.toggleId)
 
   const [fps, setFps] = useState(0)
+  const [editingTextId, setEditingTextId] = useState<string | null>(null)
+  const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
 
   const pendingObjectsRef = useRef<Array<any>>([])
   const objectsRafRef = useRef<number | null>(null)
@@ -60,7 +67,6 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     name: string
     color: string
     group: Konva.Group | null
-    samples: Array<{ x: number; y: number; t: number }>
   }>>({})
 
   // Load initial objects and subscribe to changes
@@ -80,6 +86,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
               y: r.y,
               width: r.width,
               height: r.height,
+              rotation: r.rotation,
               fill: r.fill || '#4f46e5',
               text_content: r.text_content,
               updatedAt: r.updated_at,
@@ -112,6 +119,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
           y: r.y,
           width: r.width,
           height: r.height,
+          rotation: r.rotation,
           fill: r.fill || '#4f46e5',
           text_content: r.text_content,
           updatedAt: r.updated_at,
@@ -183,16 +191,10 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
           name: cursor.name,
           color: cursor.color,
           group,
-          samples: [{ x: cursor.x, y: cursor.y, t: (cursor as any).t ?? Date.now() }],
         }
       } else {
         // Update target position for interpolation
         cursorsData[key].target = { x: cursor.x, y: cursor.y }
-        // Push timestamped sample to jitter buffer (cap length)
-        const buf = cursorsData[key].samples
-        const ts = (cursor as any).t ?? Date.now()
-        buf.push({ x: cursor.x, y: cursor.y, t: ts })
-        if (buf.length > 16) buf.shift()
 
         // Update label if name changed
         if (cursorsData[key].name !== cursor.name) {
@@ -227,33 +229,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     onCursorUpdate: handleCursorUpdate
   })
 
-  // Helper: convert content-space point to stage-space (for drawing)
-  const contentToStage = useCallback((pt: { x: number; y: number }) => {
-    const stage = stageRef.current?.getStage()
-    if (!stage) return pt
-    const transform = stage.getAbsoluteTransform().copy()
-    // Do not invert: content -> stage uses forward transform
-    return transform.point(pt)
-  }, [])
+  // (Removed transform-based reprojection to restore simpler behavior)
 
-  // Reproject existing cursors when scale/position changes
-  useEffect(() => {
-    const stage = stageRef.current?.getStage()
-    if (!stage) return
-
-    const handleTransform = () => {
-      // Nothing to change in stored content-space coords; drawing uses contentToStage per frame
-      // This callback triggers a redraw to make sure positions update immediately
-      cursorLayerRef.current?.batchDraw()
-    }
-
-    stage.on('scaleXChange scaleYChange xChange yChange', handleTransform)
-    return () => {
-      stage.off('scaleXChange scaleYChange xChange yChange', handleTransform)
-    }
-  }, [])
-
-  // Animation loop for smooth cursor interpolation with jitter buffer
+  // Animation loop for smooth cursor interpolation (simple target lerp)
   useEffect(() => {
     const anim = new Konva.Animation(() => {
       const cursorLayer = cursorLayerRef.current
@@ -262,60 +240,26 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       let needsRedraw = false
       const cursorsData = cursorsDataRef.current
 
-      // Render slightly in the past to interpolate between samples
-      const renderDelayMs = 80
-      const renderTime = performance.now() - renderDelayMs
-
-      function getDesiredPosition(samples: Array<{ x: number; y: number; t: number }>, fallback: { x: number; y: number }) {
-        if (!samples || samples.length === 0) return fallback
-        // If not enough samples, return last
-        if (samples.length === 1) return { x: samples[0].x, y: samples[0].y }
-        // Find two samples surrounding renderTime
-        let a = samples[0]
-        let b = samples[samples.length - 1]
-        if (renderTime <= a.t) return { x: a.x, y: a.y }
-        if (renderTime >= b.t) return { x: b.x, y: b.y }
-        for (let i = 1; i < samples.length; i++) {
-          const s = samples[i]
-          if (s.t >= renderTime) {
-            a = samples[i - 1]
-            b = s
-            break
-          }
-        }
-        const span = Math.max(1, b.t - a.t)
-        const tt = (renderTime - a.t) / span
-        return { x: lerp(a.x, b.x, tt), y: lerp(a.y, b.y, tt) }
-      }
-
       Object.values(cursorsData).forEach(cursor => {
         if (!cursor.group) return
 
-        // Compute desired position from jitter buffer
-        const desired = getDesiredPosition(cursor.samples, cursor.target)
-        const dx = desired.x - cursor.current.x
-        const dy = desired.y - cursor.current.y
+        const dx = cursor.target.x - cursor.current.x
+        const dy = cursor.target.y - cursor.current.y
         const distance = Math.sqrt(dx * dx + dy * dy)
 
-        // Snap when very close to avoid micro-jitter
-        if (distance < 0.75) {
-          cursor.current.x = desired.x
-          cursor.current.y = desired.y
-        } else {
-          // AGGRESSIVE lerp factors for ultra-responsive feel
-          let lerpFactor = 0.6 // Base speed (increased from 0.4)
-          if (distance > 100) {
-            lerpFactor = 0.85 // Nearly instant for big jumps
-          } else if (distance > 50) {
-            lerpFactor = 0.75 // Very fast for medium distances
-          } else if (distance > 20) {
-            lerpFactor = 0.7 // Fast for small-medium distances
-          } else {
-            lerpFactor = 0.5 // Slightly lower near target to reduce overshoot
-          }
+        // AGGRESSIVE lerp factors for ultra-responsive feel
+        let lerpFactor = 0.6
+        if (distance > 100) {
+          lerpFactor = 0.85
+        } else if (distance > 50) {
+          lerpFactor = 0.75
+        } else if (distance > 20) {
+          lerpFactor = 0.7
+        }
 
-          const newX = lerp(cursor.current.x, desired.x, lerpFactor)
-          const newY = lerp(cursor.current.y, desired.y, lerpFactor)
+        const newX = lerp(cursor.current.x, cursor.target.x, lerpFactor)
+        const newY = lerp(cursor.current.y, cursor.target.y, lerpFactor)
+        if (Math.abs(newX - cursor.current.x) > 0.05 || Math.abs(newY - cursor.current.y) > 0.05) {
           cursor.current.x = newX
           cursor.current.y = newY
         }
@@ -325,11 +269,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         const labelBg = children[1] as Konva.Rect
         const labelText = children[2] as Konva.Text
 
-        // Convert content-space current position to stage-space for drawing
-        const stagePt = contentToStage({ x: cursor.current.x, y: cursor.current.y })
-        dot.position({ x: stagePt.x, y: stagePt.y })
-        labelBg.position({ x: stagePt.x + 10, y: stagePt.y - 26 })
-        labelText.position({ x: stagePt.x + 16, y: stagePt.y - 22 })
+        dot.position({ x: cursor.current.x, y: cursor.current.y })
+        labelBg.position({ x: cursor.current.x + 10, y: cursor.current.y - 26 })
+        labelText.position({ x: cursor.current.x + 16, y: cursor.current.y - 22 })
 
         needsRedraw = true
       })
@@ -345,50 +287,44 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       anim.stop()
       Object.values(cursorsDataRef.current).forEach(cursor => cursor.group?.destroy())
     }
-  }, [contentToStage])
+  }, [])
 
-  // Broadcast cursor position on mouse move - OPTIMIZED FOR 30FPS
+  // Broadcast cursor position on mouse move - adaptive 30/60fps stage-space
   useEffect(() => {
     let lastPos = { x: 0, y: 0 }
-    const minDelta = 3 // Slightly increased to reduce unnecessary updates
-    let baseTickMs = 33 // ~30fps (optimal balance: responsive + low bandwidth)
-    let lastTick = 0
-
-    // Adaptive burst mode when pointer moves fast
-    let burstUntil = 0
+    const minDelta = 3
+    const baseTickMs = 33 // ~30fps
+    const burstTickMs = 16 // ~60fps during burst
+    const burstDurationMs = 150
     const velocityThreshold = 300 // px/sec
+
+    let lastTick = 0
     let lastTime = performance.now()
+    let burstUntil = 0
 
     const handleMove = () => {
       const now = performance.now()
-      const tickMs = now < burstUntil ? 16 : baseTickMs
+      const tickMs = now < burstUntil ? burstTickMs : baseTickMs
       if (now - lastTick < tickMs) return
       lastTick = now
       if (document.hidden) return
 
-      const stage = stageRef.current?.getStage()
-      const raw = stage?.getPointerPosition()
-      if (!stage || !raw) return
+      const pos = stageRef.current?.getStage()?.getPointerPosition()
+      if (!pos) return
 
-      // Map to content coordinates (inverse stage transform)
-      const transform = stage.getAbsoluteTransform().copy()
-      transform.invert()
-      const content = transform.point(raw)
-
-      const dx = content.x - lastPos.x
-      const dy = content.y - lastPos.y
+      const dx = pos.x - lastPos.x
+      const dy = pos.y - lastPos.y
       const dist = Math.hypot(dx, dy)
       const dt = Math.max(1, now - lastTime)
-      const velocity = (dist * 1000) / dt // px/sec
+      const velocity = (dist * 1000) / dt
 
       if (dist < minDelta) return
 
-      // Enable burst mode briefly on high velocity
-      if (velocity > velocityThreshold) burstUntil = now + 250
+      if (velocity > velocityThreshold) burstUntil = now + burstDurationMs
 
-      lastPos = { x: content.x, y: content.y }
+      lastPos = { x: pos.x, y: pos.y }
       lastTime = now
-      trackCursor(content.x, content.y)
+      trackCursor(pos.x, pos.y)
     }
 
     const stage = stageRef.current?.getStage()
@@ -420,6 +356,19 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     return () => { mounted = false; cancelAnimationFrame(id) }
   }, [])
 
+  // Attach transformer to selected shapes
+  useEffect(() => {
+    const transformer = transformerRef.current
+    if (!transformer) return
+
+    const selectedNodes = selectedIds
+      .map(id => shapeRefsMap.current.get(id))
+      .filter(Boolean)
+
+    transformer.nodes(selectedNodes)
+    transformer.getLayer()?.batchDraw()
+  }, [selectedIds])
+
   const onWheel = throttle((e: any) => {
     e.evt.preventDefault()
     const scaleBy = 1.05
@@ -434,9 +383,15 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     const pointer = stage.getPointerPosition()
     const newPos = { x: pointer.x - mousePointTo.x * newScale, y: pointer.y - mousePointTo.y * newScale }
     stage.position(newPos)
+    setStagePos(newPos)
   }, 16)
 
-  const onStageDragEnd = () => {}
+  const onStageDragEnd = () => {
+    const stage = stageRef.current
+    if (stage) {
+      setStagePos({ x: stage.x(), y: stage.y() })
+    }
+  }
 
   // Event delegation for object dragging
   const onLayerDragEnd = useCallback((e: any) => {
@@ -447,18 +402,53 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     if (!id) return
 
     const finalPos = { x: shape.x(), y: shape.y() }
-    
+
     // Update local state immediately
-    upsertObject({ 
-      id, 
-      x: finalPos.x, 
+    upsertObject({
+      id,
+      x: finalPos.x,
       y: finalPos.y,
       width: shape.width(),
       height: shape.height()
     })
-    
+
     // Broadcast to other users
     supabase.from('objects').update({ x: finalPos.x, y: finalPos.y }).eq('id', id).then()
+  }, [upsertObject])
+
+  // Handle transform (resize/rotate) end
+  const onTransformEnd = useCallback((e: any) => {
+    const node = e.target
+    const id = node.attrs.id
+    if (!id) return
+
+    const scaleX = node.scaleX()
+    const scaleY = node.scaleY()
+
+    // Reset scale and apply to width/height
+    node.scaleX(1)
+    node.scaleY(1)
+
+    const updates: any = {
+      id,
+      x: node.x(),
+      y: node.y(),
+      rotation: node.rotation(),
+      width: Math.max(5, node.width() * scaleX),
+      height: Math.max(5, node.height() * scaleY),
+    }
+
+    // Update local state
+    upsertObject(updates)
+
+    // Broadcast to database
+    supabase.from('objects').update({
+      x: updates.x,
+      y: updates.y,
+      width: updates.width,
+      height: updates.height,
+      rotation: updates.rotation,
+    }).eq('id', id).then()
   }, [upsertObject])
 
   const addShape = async (type: 'rect' | 'circle' | 'text') => {
@@ -504,32 +494,138 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     }
   }
 
+  const onShapeDoubleClick = (e: any) => {
+    const shape = e.target
+    const id = shape?.attrs?.id
+    const obj = objects.find(o => o.id === id)
+    if (obj && obj.type === 'text') {
+      setEditingTextId(id)
+      setSelectedIds([]) // Clear selection while editing
+    }
+  }
+
+  // Keyboard shortcuts callbacks
+  const handleDeleteSelected = useCallback(async () => {
+    if (selectedIds.length === 0) return
+
+    for (const id of selectedIds) {
+      await supabase.from('objects').delete().eq('id', id)
+    }
+    setSelectedIds([])
+  }, [selectedIds, setSelectedIds])
+
+  const handleDuplicateSelected = useCallback(async () => {
+    if (selectedIds.length === 0) return
+
+    const selectedObjects = selectedIds
+      .map(id => objects.find(o => o.id === id))
+      .filter(Boolean)
+
+    const newObjects = selectedObjects.map(obj => ({
+      canvas_id: canvasId,
+      type: obj!.type,
+      x: obj!.x + 20,
+      y: obj!.y + 20,
+      width: obj!.width,
+      height: obj!.height,
+      rotation: obj!.rotation,
+      fill: obj!.fill,
+      text_content: obj!.text_content,
+    }))
+
+    const { data, error } = await supabase
+      .from('objects')
+      .insert(newObjects)
+      .select()
+
+    if (!error && data) {
+      setSelectedIds(data.map(obj => obj.id))
+    }
+  }, [selectedIds, objects, canvasId, setSelectedIds])
+
+  const handleZoomIn = useCallback(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    const oldScale = stage.scaleX()
+    const newScale = oldScale * 1.2
+    setScale(newScale)
+    const pointer = stage.getPointerPosition() || { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+    const mousePointTo = {
+      x: (pointer.x - stage.x()) / oldScale,
+      y: (pointer.y - stage.y()) / oldScale,
+    }
+    stage.position({
+      x: pointer.x - mousePointTo.x * newScale,
+      y: pointer.y - mousePointTo.y * newScale,
+    })
+    setStagePos({ x: stage.x(), y: stage.y() })
+  }, [])
+
+  const handleZoomOut = useCallback(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    const oldScale = stage.scaleX()
+    const newScale = oldScale / 1.2
+    setScale(newScale)
+    const pointer = stage.getPointerPosition() || { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+    const mousePointTo = {
+      x: (pointer.x - stage.x()) / oldScale,
+      y: (pointer.y - stage.y()) / oldScale,
+    }
+    stage.position({
+      x: pointer.x - mousePointTo.x * newScale,
+      y: pointer.y - mousePointTo.y * newScale,
+    })
+    setStagePos({ x: stage.x(), y: stage.y() })
+  }, [])
+
+  const handleNudge = useCallback(async (dx: number, dy: number) => {
+    if (selectedIds.length === 0) return
+
+    for (const id of selectedIds) {
+      const obj = objects.find(o => o.id === id)
+      if (obj) {
+        const newX = obj.x + dx
+        const newY = obj.y + dy
+        upsertObject({ id, x: newX, y: newY })
+        await supabase.from('objects').update({ x: newX, y: newY }).eq('id', id)
+      }
+    }
+  }, [selectedIds, objects, upsertObject])
+
+  const handleTextSave = useCallback(async (newText: string) => {
+    if (!editingTextId) return
+
+    await supabase
+      .from('objects')
+      .update({ text_content: newText })
+      .eq('id', editingTextId)
+
+    setEditingTextId(null)
+  }, [editingTextId])
+
+  const handleTextCancel = useCallback(() => {
+    setEditingTextId(null)
+  }, [])
+
+  // Integrate keyboard shortcuts
+  useKeyboardShortcuts({
+    canvasId,
+    objects: objectsRecord,
+    onDeleteSelected: handleDeleteSelected,
+    onDuplicateSelected: handleDuplicateSelected,
+    onZoomIn: handleZoomIn,
+    onZoomOut: handleZoomOut,
+    onNudge: handleNudge,
+    upsertObject,
+  })
+
   return (
-    <div style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: 8, borderBottom: '1px solid #eee', display: 'flex', gap: 8 }}>
-        <button 
-          onClick={() => addShape('rect')}
-          style={{ padding: '8px 16px', borderRadius: 4, border: '1px solid #4f46e5', background: 'white', cursor: 'pointer' }}
-        >
-          ⬜ Rectangle
-        </button>
-        <button 
-          onClick={() => addShape('circle')}
-          style={{ padding: '8px 16px', borderRadius: 4, border: '1px solid #4f46e5', background: 'white', cursor: 'pointer' }}
-        >
-          ⚫ Circle
-        </button>
-        <button 
-          onClick={() => addShape('text')}
-          style={{ padding: '8px 16px', borderRadius: 4, border: '1px solid #4f46e5', background: 'white', cursor: 'pointer' }}
-        >
-          T Text
-        </button>
-      </div>
+    <div style={{ height: '100%', width: '100%', position: 'relative' }}>
       <Stage
         ref={stageRef}
         width={window.innerWidth}
-        height={window.innerHeight - 48}
+        height={window.innerHeight}
         draggable
         scaleX={scale}
         scaleY={scale}
@@ -543,6 +639,16 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
               key: o.id,
               draggable: true,
               onClick: onShapeClick,
+              onDblClick: onShapeDoubleClick,
+              rotation: o.rotation || 0,
+              onTransformEnd: onTransformEnd,
+              ref: (node: any) => {
+                if (node) {
+                  shapeRefsMap.current.set(o.id, node)
+                } else {
+                  shapeRefsMap.current.delete(o.id)
+                }
+              },
             }
 
             if (o.type === 'circle') {
@@ -588,6 +694,16 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
               )
             }
           })}
+          <Transformer
+            ref={transformerRef}
+            boundBoxFunc={(oldBox, newBox) => {
+              // Limit resize to minimum 5px
+              if (newBox.width < 5 || newBox.height < 5) {
+                return oldBox
+              }
+              return newBox
+            }}
+          />
         </Layer>
         
         {/* Cursor layer - managed entirely by refs, never re-renders */}
@@ -596,6 +712,33 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '4px 8px', borderRadius: 4, fontSize: 12 }}>
         FPS: {fps}
       </div>
+
+      {/* Text editor overlay */}
+      {editingTextId && (() => {
+        const textObj = objects.find(o => o.id === editingTextId)
+        if (!textObj) return null
+        return (
+          <TextEditor
+            value={textObj.text_content || ''}
+            x={textObj.x}
+            y={textObj.y}
+            width={textObj.width}
+            fontSize={20}
+            stageScale={scale}
+            stageX={stagePos.x}
+            stageY={stagePos.y}
+            onSave={handleTextSave}
+            onCancel={handleTextCancel}
+          />
+        )
+      })()}
+
+      {/* Bottom toolbar */}
+      <BottomToolbar
+        onAddShape={addShape}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+      />
     </div>
   )
 }
