@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react'
+import type { CSSProperties } from 'react'
 
 const CANVAS_COLORS = {
   indigo: '#4f46e5',
