@@ -982,9 +982,18 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   const handleDeleteSelected = useCallback(async () => {
     if (selectedIds.length === 0) return
 
-    for (const id of selectedIds) {
-      await supabase.from('objects').delete().eq('id', id)
+    // Delete all selected objects in a single batch operation
+    const { error } = await supabase
+      .from('objects')
+      .delete()
+      .in('id', selectedIds)
+
+    if (error) {
+      console.error('Failed to delete objects:', error)
+      return
     }
+
+    // Only clear selection if delete succeeded
     setSelectedIds([])
   }, [selectedIds, setSelectedIds])
 
