@@ -67,7 +67,13 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
     }
 
     const channel = supabase.channel(`presence:canvas:${canvasId}`, { 
-      config: { presence: { key: uid } } 
+      config: { 
+        presence: { key: uid },
+        broadcast: { 
+          self: false,  // Don't broadcast to self
+          ack: false    // Don't wait for acknowledgments (faster cursor updates)
+        }
+      } 
     })
     
     channelRef.current = channel
@@ -179,8 +185,8 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
   // Smart debouncing with dead zone
   const lastBroadcastPos = useRef({ x: 0, y: 0 })
   const lastBroadcastTime = useRef(0)
-  const DEAD_ZONE = 2  // Pixels - don't broadcast tiny movements
-  const MIN_BROADCAST_INTERVAL = 50  // ms (20fps max)
+  const DEAD_ZONE = 1  // Pixels - more responsive (reduced from 2)
+  const MIN_BROADCAST_INTERVAL = 16  // ms (~60fps, reduced from 50ms for faster cursor updates)
 
   return {
     trackCursor: (x: number, y: number) => {

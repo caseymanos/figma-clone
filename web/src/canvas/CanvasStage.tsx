@@ -145,7 +145,12 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     })
 
     const channel = supabase
-      .channel(`objects:${canvasId}`)
+      .channel(`objects:${canvasId}`, {
+        config: {
+          broadcast: { ack: false },  // Don't wait for acknowledgments (faster object updates)
+          presence: { key: '' }
+        }
+      })
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'objects', filter: `canvas_id=eq.${canvasId}` },

@@ -18,9 +18,9 @@ export interface SmoothedCursor {
   lastUpdateTime: number
 }
 
-// Smoothing constants
-const SMOOTH_FACTOR = 0.15  // Gentle interpolation (vs aggressive 0.6-0.85)
-const VELOCITY_SMOOTH_FACTOR = 0.2
+// Smoothing constants - optimized for lower latency
+const SMOOTH_FACTOR = 0.35  // More responsive interpolation (increased from 0.15)
+const VELOCITY_SMOOTH_FACTOR = 0.4  // Faster velocity response (increased from 0.2)
 const MAX_PREDICTION_MS = 100  // Maximum time to predict ahead
 const MIN_MOVEMENT_THRESHOLD = 0.1  // Pixels
 

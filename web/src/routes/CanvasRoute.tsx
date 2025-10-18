@@ -56,6 +56,38 @@ export default function CanvasRoute() {
       })
   }, [canvasId, navigate])
 
+  // Auto-join canvas as member when visiting (fixes: users can't see existing objects)
+  useEffect(() => {
+    if (!canvasId) return
+    
+    const autoJoinCanvas = async () => {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const userId = sessionData.session?.user.id
+      if (!userId) return
+
+      // Check if already a member
+      const { data: existing } = await supabase
+        .from('canvas_members')
+        .select('user_id')
+        .eq('canvas_id', canvasId)
+        .eq('user_id', userId)
+        .maybeSingle()
+
+      // If not a member, add them as an editor
+      if (!existing) {
+        await supabase
+          .from('canvas_members')
+          .insert({ canvas_id: canvasId, user_id: userId, role: 'editor' })
+          .select()
+          .single()
+      }
+    }
+
+    autoJoinCanvas().catch(err => {
+      console.error('Failed to auto-join canvas:', err)
+    })
+  }, [canvasId])
+
   const handleColorSelect = (colorName: string, colorHex: string) => {
     setSelectedColorName(colorName)
     setSelectedColorHex(colorHex)
