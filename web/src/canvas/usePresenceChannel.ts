@@ -85,13 +85,13 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
     })
 
     cursorChannel
-      .on('broadcast', { event: 'cursor' }, (payload: any) => {
-        // payload: { id, x, y, t, seq }
-        if (!onCursorUpdate) return
+      .on('broadcast', { event: 'cursor' }, ({ payload: p }: any) => {
+        // Supabase passes an envelope with { event, payload }
+        if (!onCursorUpdate || !p || !p.id) return
         const users = usePresenceState.getState().users
-        const name = users[payload?.id]?.displayName || 'User'
-        const color = users[payload?.id]?.color || myColorRef.current
-        onCursorUpdate({ [payload.id]: { x: payload.x, y: payload.y, name, color, t: payload.t, seq: payload.seq } })
+        const name = users[p.id]?.displayName || 'User'
+        const color = users[p.id]?.color || myColorRef.current
+        onCursorUpdate({ [p.id]: { x: p.x, y: p.y, name, color, t: p.t, seq: p.seq } })
       })
 
     cursorChannelRef.current = cursorChannel
@@ -177,8 +177,11 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
       }
     })
 
-    // Subscribe cursor broadcast channel
-    cursorChannel.subscribe()
+    // Subscribe cursor broadcast channel and gate sending until ready
+    let cursorReady = false
+    cursorChannel.subscribe((status: any) => {
+      if (status === 'SUBSCRIBED') cursorReady = true
+    })
 
     return () => {
       supabase.removeChannel(channel)
@@ -249,12 +252,14 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
         lastMetadataBroadcastRef.current = currentMetadata
       }
 
-      // Send cursor position via Broadcast
-      cursorChannelRef.current.send({
-        type: 'broadcast',
-        event: 'cursor',
-        payload: { id: myIdRef.current, x: roundedX, y: roundedY, t: now, seq }
-      })
+      // Send cursor position via Broadcast (only after channel subscribed)
+      if ((cursorChannelRef.current as any)?.state?.value === 'joined' || (cursorChannelRef.current as any)?.state === 'joined') {
+        cursorChannelRef.current.send({
+          type: 'broadcast',
+          event: 'cursor',
+          payload: { id: myIdRef.current, x: roundedX, y: roundedY, t: now, seq }
+        })
+      }
 
       // Update tracking refs
       lastBroadcastPos.current = { x: roundedX, y: roundedY }
