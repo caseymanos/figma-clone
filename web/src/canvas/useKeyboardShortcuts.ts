@@ -158,8 +158,9 @@ export function useKeyboardShortcuts({
             break
         }
 
-        // Delete/Backspace handling (separate check, not lowercased)
-        if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length > 0) {
+        // Delete/Backspace handling (check both key and code for compatibility)
+        const isDeleteKey = e.key === 'Delete' || e.key === 'Backspace' || e.code === 'Delete' || e.code === 'Backspace'
+        if (isDeleteKey && selectedIds.length > 0) {
           e.preventDefault()
           onDeleteSelected()
         }

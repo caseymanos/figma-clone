@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { ensureCanvasMembership } from '../lib/canvasService'
 import { CanvasStage } from '../canvas/CanvasStage'
 import { PresenceSidebar } from '../canvas/PresenceSidebar'
 import { ProfileSettings } from '../components/ProfileSettings'
@@ -17,6 +18,7 @@ export default function CanvasRoute() {
   const [showProfileSettings, setShowProfileSettings] = useState(false)
   const [sessionName, setSessionName] = useState(() => localStorage.getItem('session_name') || '')
   const [sessionColor, setSessionColor] = useState(() => localStorage.getItem('session_color') || '#ef4444')
+  const [membershipReady, setMembershipReady] = useState(false)
   
   // Color palette state
   const [selectedColorName, setSelectedColorName] = useState<string>(() => {
@@ -38,8 +40,20 @@ export default function CanvasRoute() {
   
   const showAI = true
 
+  // Ensure user is a member of this canvas before rendering
   useEffect(() => {
-    if (!canvasId) navigate('/')
+    if (!canvasId) {
+      navigate('/')
+      return
+    }
+    
+    ensureCanvasMembership(canvasId)
+      .then(() => setMembershipReady(true))
+      .catch((err) => {
+        console.error('Failed to join canvas:', err)
+        alert('Unable to access this canvas. It may not exist or you may not have permission.')
+        navigate('/')
+      })
   }, [canvasId, navigate])
 
   const handleColorSelect = (colorName: string, colorHex: string) => {
@@ -199,9 +213,9 @@ export default function CanvasRoute() {
           </div>
         </header>
             <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-              {canvasId ? <CanvasStage canvasId={canvasId} selectedColor={selectedColorHex} /> : null}
-              {canvasId ? <PresenceSidebar /> : null}
-              {canvasId && showAI ? (
+              {canvasId && membershipReady ? <CanvasStage canvasId={canvasId} selectedColor={selectedColorHex} /> : null}
+              {canvasId && membershipReady ? <PresenceSidebar /> : null}
+              {canvasId && membershipReady && showAI ? (
                 <>
                   <AIPanel canvasId={canvasId} selectedColorName={selectedColorName} />
                   <ColorPalette
@@ -210,6 +224,18 @@ export default function CanvasRoute() {
                   />
                 </>
               ) : null}
+              {!membershipReady && canvasId && (
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  color: colors.text.primary,
+                  fontSize: typography.fontSize.base,
+                }}>
+                  Loading canvas...
+                </div>
+              )}
             </div>
         {showProfileSettings && (
           <ProfileSettings onClose={() => setShowProfileSettings(false)} />

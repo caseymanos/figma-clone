@@ -3,7 +3,6 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { updateObjectOptimistic, updateManyPositionsOptimistic } from './api'
 import { useCanvasState, useToolState } from './state'
-import type { Tool } from './state'
 import { usePresenceChannel } from './usePresenceChannel'
 import { usePresenceState } from './presenceState'
 import { useSelection } from './selection'
@@ -125,10 +124,6 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
 
   const pendingObjectsRef = useRef<Array<any>>([])
   const objectsRafRef = useRef<number | null>(null)
-
-  // Spacebar pan state
-  const [isSpacebarHeld, setIsSpacebarHeld] = useState(false)
-  const previousToolRef = useRef<Tool | null>(null)
 
   // Multi-select drag tracking
   const dragStartPositionsRef = useRef<Record<string, { x: number; y: number }>>({})
@@ -1094,47 +1089,8 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     upsertObject,
   })
 
-  // Spacebar pan functionality
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in text editor or input field
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || editingTextId) {
-        return
-      }
-
-      // Spacebar to temporarily enable pan
-      if (e.code === 'Space' && !isSpacebarHeld && !isDrawing) {
-        e.preventDefault()
-        setIsSpacebarHeld(true)
-        previousToolRef.current = activeTool
-      }
-    }
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && isSpacebarHeld) {
-        e.preventDefault()
-        setIsSpacebarHeld(false)
-        // Restore previous tool
-        if (previousToolRef.current) {
-          setActiveTool(previousToolRef.current)
-          previousToolRef.current = null
-        }
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('keyup', handleKeyUp)
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
-    }
-  }, [isSpacebarHeld, activeTool, setActiveTool, editingTextId, isDrawing])
-
   // Update cursor style based on active tool
   const getCursorStyle = () => {
-    if (isSpacebarHeld) return 'grab'
-
     switch (activeTool) {
       case 'pan':
         return 'grab'
@@ -1164,7 +1120,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         ref={stageRef}
         width={window.innerWidth}
         height={window.innerHeight}
-        draggable={activeTool === 'pan' || isSpacebarHeld}
+        draggable={activeTool === 'pan'}
         scaleX={scale}
         scaleY={scale}
         onWheel={onWheel}
