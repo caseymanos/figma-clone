@@ -1,6 +1,4 @@
-import { openai } from '@ai-sdk/openai'
-import { streamText, tool } from 'ai'
-import { z } from 'zod'
+import OpenAI from 'openai'
 
 export const runtime = 'edge'
 export const maxDuration = 30 // 30 second timeout
@@ -50,8 +48,7 @@ const CANVAS_COLORS: Record<string, string> = {
 }
 
 // Tool definitions for OpenAI function calling
-// These will be executed client-side
-const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+const tools: any[] = [
   {
     type: 'function',
     function: {
