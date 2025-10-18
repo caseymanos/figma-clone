@@ -9,8 +9,8 @@ import { useSelection } from './selection'
 import { useKeyboardShortcuts } from './useKeyboardShortcuts'
 import { TextEditor } from '../components/TextEditor'
 import { BottomToolbar } from '../components/BottomToolbar'
-import { createSmoothedCursor, updateSmoothedCursor, animateCursor, stageToContent } from './cursorSmoothing'
-import type { SmoothedCursor } from './cursorSmoothing'
+import { stageToContent, contentToStage } from './cursorSmoothing'
+import { CursorPredictor } from './cursorPrediction'
 import Konva from 'konva'
 import { trackConflict } from '../lib/metrics'
 
@@ -131,7 +131,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
 
   // Cursor data store - ref-based, never triggers React renders
   const cursorsDataRef = useRef<Record<string, {
-    smoothed: SmoothedCursor
+    predictor: CursorPredictor
     name: string
     color: string
     group: Konva.Group | null
@@ -224,7 +224,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   }, [canvasId, upsertMany, removeObject])
 
   // CURSOR SYSTEM - Using shared presence hook
-  const handleCursorUpdate = useCallback((cursors: Record<string, { x: number; y: number; name: string; color: string; t?: number }>) => {
+  const handleCursorUpdate = useCallback((cursors: Record<string, { x: number; y: number; name: string; color: string; t?: number; seq?: number }>) => {
     const cursorLayer = cursorLayerRef.current
     if (!cursorLayer) return
 
@@ -266,7 +266,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       const cursorsData = cursorsDataRef.current
 
       if (!cursorsData[key]) {
-        // Create new cursor with smoothing
+        // Create new cursor with predictor
         const group = createCursorGroup(
           cursor.x,
           cursor.y,
@@ -275,19 +275,34 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         )
         cursorLayer.add(group)
 
+        const predictor = new CursorPredictor({
+          interpolationDelayMs: 100,
+          maxExtrapolationMs: 150,
+          maxSpeedPxPerSec: 5000,
+        })
+        
+        // Push initial sample
+        predictor.push({
+          x: cursor.x,
+          y: cursor.y,
+          arriveMs: performance.now(),
+          seq: cursor.seq,
+        })
+
         cursorsData[key] = {
-          smoothed: createSmoothedCursor(cursor.x, cursor.y),
+          predictor,
           name: cursor.name,
           color: cursor.color,
           group,
         }
       } else {
-        // Update smoothed target position
-        updateSmoothedCursor(
-          cursorsData[key].smoothed,
-          { x: cursor.x, y: cursor.y },
-          cursor.t
-        )
+        // Push new sample to predictor
+        cursorsData[key].predictor.push({
+          x: cursor.x,
+          y: cursor.y,
+          arriveMs: performance.now(),
+          seq: cursor.seq,
+        })
 
         // Update label if name changed
         if (cursorsData[key].name !== cursor.name) {
@@ -323,14 +338,16 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     onCursorUpdate: handleCursorUpdate
   })
 
-  // Animation loop with exponential smoothing and prediction
+  // Animation loop with predictor and coordinate transform
   useEffect(() => {
     const anim = new Konva.Animation(() => {
       const cursorLayer = cursorLayerRef.current
-      if (!cursorLayer) return
+      const stage = stageRef.current
+      if (!cursorLayer || !stage) return
 
       let needsRedraw = false
       const cursorsData = cursorsDataRef.current
+      const now = performance.now()
 
       Object.entries(cursorsData).forEach(([id, cursor]) => {
         if (!cursor.group) return
@@ -343,17 +360,26 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
 
         cursor.group.opacity(1)
 
-        // Animate with prediction
-        const pos = animateCursor(cursor.smoothed, true)
+        // Get predicted position in content space
+        const contentPos = cursor.predictor.getPosition(now)
+
+        // Convert content space to stage space for rendering
+        const stagePos = contentToStage(
+          contentPos.x,
+          contentPos.y,
+          stage.x(),
+          stage.y(),
+          stage.scaleX()
+        )
 
         const children = cursor.group.getChildren()
         const dot = children[0] as Konva.Circle
         const labelBg = children[1] as Konva.Rect
         const labelText = children[2] as Konva.Text
 
-        dot.position({ x: pos.x, y: pos.y })
-        labelBg.position({ x: pos.x + 10, y: pos.y - 26 })
-        labelText.position({ x: pos.x + 16, y: pos.y - 22 })
+        dot.position({ x: stagePos.x, y: stagePos.y })
+        labelBg.position({ x: stagePos.x + 10, y: stagePos.y - 26 })
+        labelText.position({ x: stagePos.x + 16, y: stagePos.y - 22 })
 
         needsRedraw = true
       })

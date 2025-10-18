@@ -4,7 +4,7 @@ import { usePresenceState } from './presenceState'
 
 interface UsePresenceChannelOptions {
   canvasId: string
-  onCursorUpdate?: (cursors: Record<string, { x: number; y: number; name: string; color: string; t?: number }>) => void
+  onCursorUpdate?: (cursors: Record<string, { x: number; y: number; name: string; color: string; t?: number; seq?: number }>) => void
 }
 
 // Get session settings from localStorage
@@ -23,6 +23,7 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
   const myNameRef = useRef<string>('User')
   const myColorRef = useRef<string>('#ef4444')
   const channelRef = useRef<any>(null)
+  const cursorChannelRef = useRef<any>(null)
   const lastMetadataBroadcastRef = useRef<{ name: string; color: string; editingIds?: string[] }>({ name: '', color: '' })
   const myEditingIdsRef = useRef<string[]>([])
 
@@ -34,8 +35,6 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
     // Broadcast updated settings WITH all required fields
     if (channelRef.current) {
       channelRef.current.track({
-        x: 0,
-        y: 0,
         name: name,
         color: color,
         avatarUrl: undefined,
@@ -78,9 +77,28 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
     
     channelRef.current = channel
 
+    // Create dedicated broadcast channel for high-frequency cursor updates
+    const cursorChannel = supabase.channel(`cursor:canvas:${canvasId}`, {
+      config: {
+        broadcast: { self: false, ack: false }
+      }
+    })
+
+    cursorChannel
+      .on('broadcast', { event: 'cursor' }, (payload: any) => {
+        // payload: { id, x, y, t, seq }
+        if (!onCursorUpdate) return
+        const users = usePresenceState.getState().users
+        const name = users[payload?.id]?.displayName || 'User'
+        const color = users[payload?.id]?.color || myColorRef.current
+        onCursorUpdate({ [payload.id]: { x: payload.x, y: payload.y, name, color, t: payload.t, seq: payload.seq } })
+      })
+
+    cursorChannelRef.current = cursorChannel
+
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState() as Record<string, Array<any>>
-      const cursors: Record<string, { x: number; y: number; name: string; color: string; t?: number }> = {}
+      const cursors: Record<string, { x: number; y: number; name: string; color: string; t?: number; seq?: number }> = {}
 
       Object.entries(state).forEach(([key, arr]) => {
         const latest = arr[arr.length - 1]
@@ -91,7 +109,8 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
           y: latest.y || 0,
           name: latest.name || 'User',
           color: latest.color || myColorRef.current,
-          t: latest.t
+          t: latest.t,
+          seq: latest.seq
         }
 
         // Update presence store (include all sessions)
@@ -116,10 +135,7 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
         }
       })
 
-      // Notify cursor system
-      if (onCursorUpdate) {
-        onCursorUpdate(cursors)
-      }
+      // Do not notify cursor positions from Presence; positions come from Broadcast
     })
 
     // Subscribe and fetch user info
@@ -150,8 +166,6 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
         
         // Initial track with correct name
         await channel.track({ 
-          x: 0, 
-          y: 0, 
           name: displayName,
           avatarUrl: avatarUrl,
           color: myColorRef.current, 
@@ -163,8 +177,12 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
       }
     })
 
+    // Subscribe cursor broadcast channel
+    cursorChannel.subscribe()
+
     return () => {
       supabase.removeChannel(channel)
+      supabase.removeChannel(cursorChannel)
     }
   }, [canvasId, addUser, removeUser, updateUser, onCursorUpdate])
 
@@ -185,12 +203,13 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
   // Smart debouncing with dead zone
   const lastBroadcastPos = useRef({ x: 0, y: 0 })
   const lastBroadcastTime = useRef(0)
+  const seqCounter = useRef(0)
   const DEAD_ZONE = 1  // Pixels - more responsive (reduced from 2)
   const MIN_BROADCAST_INTERVAL = 16  // ms (~60fps, reduced from 50ms for faster cursor updates)
 
   return {
     trackCursor: (x: number, y: number) => {
-      if (!channelRef.current) return
+      if (!cursorChannelRef.current) return
 
       const now = Date.now()
       const timeSinceBroadcast = now - lastBroadcastTime.current
@@ -205,6 +224,13 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
         return
       }
 
+      // Round to 0.1px to reduce noise
+      const roundedX = Math.round(x * 10) / 10
+      const roundedY = Math.round(y * 10) / 10
+
+      // Increment sequence for ordering
+      const seq = seqCounter.current++
+
       // Only include metadata if it changed (reduces payload by 50%)
       const currentMetadata = { name: myNameRef.current, color: myColorRef.current, editingIds: myEditingIdsRef.current }
       const metadataChanged =
@@ -212,28 +238,26 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
         lastMetadataBroadcastRef.current.color !== currentMetadata.color ||
         JSON.stringify(lastMetadataBroadcastRef.current.editingIds || []) !== JSON.stringify(currentMetadata.editingIds || [])
 
-      if (metadataChanged) {
-        // Full update with metadata
+      if (metadataChanged && channelRef.current) {
+        // Update Presence metadata (no x/y)
         channelRef.current.track({
-          x,
-          y,
           name: currentMetadata.name,
           color: currentMetadata.color,
           editingIds: currentMetadata.editingIds,
           t: now
         })
         lastMetadataBroadcastRef.current = currentMetadata
-      } else {
-        // Position-only update (50% smaller payload)
-        channelRef.current.track({
-          x,
-          y,
-          t: now
-        })
       }
 
+      // Send cursor position via Broadcast
+      cursorChannelRef.current.send({
+        type: 'broadcast',
+        event: 'cursor',
+        payload: { id: myIdRef.current, x: roundedX, y: roundedY, t: now, seq }
+      })
+
       // Update tracking refs
-      lastBroadcastPos.current = { x, y }
+      lastBroadcastPos.current = { x: roundedX, y: roundedY }
       lastBroadcastTime.current = now
     },
     setEditingIds: (ids: string[]) => {
