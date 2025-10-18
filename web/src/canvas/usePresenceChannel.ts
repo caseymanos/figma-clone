@@ -177,11 +177,8 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
       }
     })
 
-    // Subscribe cursor broadcast channel and gate sending until ready
-    let cursorReady = false
-    cursorChannel.subscribe((status: any) => {
-      if (status === 'SUBSCRIBED') cursorReady = true
-    })
+    // Subscribe cursor broadcast channel
+    cursorChannel.subscribe()
 
     return () => {
       supabase.removeChannel(channel)
