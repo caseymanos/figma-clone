@@ -1,4 +1,6 @@
 import type { CSSProperties } from 'react'
+import { useState } from 'react'
+import { ChromePicker } from 'react-color'
 import { useUIState } from '../canvas/uiState'
 import { useDraggable } from '../canvas/useDraggable'
 import { getSnapPositionStyle, getSnapPreviewStyle } from '../canvas/snapPositions'
@@ -46,14 +48,18 @@ interface ColorPaletteProps {
 export function ColorPalette({ selectedColor, onColorSelect }: ColorPaletteProps) {
   const collapsed = useUIState((s) => s.colorPaletteCollapsed)
   const showAll = useUIState((s) => s.colorPaletteShowAll)
+  const showColorWheel = useUIState((s) => s.showColorWheel)
   const strokeWidth = useUIState((s) => s.strokeWidth)
   const opacity = useUIState((s) => s.opacity)
   const position = useUIState((s) => s.colorPalettePosition)
   const setCollapsed = useUIState((s) => s.setColorPaletteCollapsed)
   const setShowAll = useUIState((s) => s.setColorPaletteShowAll)
+  const setShowColorWheel = useUIState((s) => s.setShowColorWheel)
   const setStrokeWidth = useUIState((s) => s.setStrokeWidth)
   const setOpacity = useUIState((s) => s.setOpacity)
   const setPosition = useUIState((s) => s.setColorPalettePosition)
+
+  const [customColor, setCustomColor] = useState(selectedColor)
 
   const { isDragging, onMouseDown, dragStyle, previewPosition } = useDraggable({
     currentPosition: position,
@@ -284,6 +290,56 @@ export function ColorPalette({ selectedColor, onColorSelect }: ColorPaletteProps
       >
         {showAll ? '▲ Show Less' : '▼ Show More Colors'}
       </button>
+
+      {/* Color Wheel Toggle */}
+      <button
+        onClick={() => setShowColorWheel(!showColorWheel)}
+        style={{
+          width: '100%',
+          padding: '6px',
+          fontSize: 10,
+          fontWeight: 600,
+          color: '#4f46e5',
+          background: '#f9fafb',
+          border: '1px solid #e5e7eb',
+          borderRadius: 4,
+          cursor: 'pointer',
+          marginBottom: showColorWheel ? 8 : 8,
+          transition: 'all 0.2s ease',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = '#eef2ff'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = '#f9fafb'
+        }}
+      >
+        {showColorWheel ? '▲ Hide Color Wheel' : '🎨 Show Color Wheel'}
+      </button>
+
+      {/* Color Wheel Picker */}
+      {showColorWheel && (
+        <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'center' }}>
+          <ChromePicker
+            color={customColor}
+            onChange={(color) => {
+              setCustomColor(color.hex)
+              onColorSelect('custom', color.hex)
+            }}
+            disableAlpha={false}
+            styles={{
+              default: {
+                picker: {
+                  boxShadow: 'none',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '6px',
+                  width: '100%',
+                },
+              },
+            }}
+          />
+        </div>
+      )}
 
       {/* Stroke Width */}
       <div style={optionRowStyle}>

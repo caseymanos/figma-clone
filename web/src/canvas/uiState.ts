@@ -15,6 +15,7 @@ interface UIState {
   // Panel visibility states
   colorPaletteCollapsed: boolean
   colorPaletteShowAll: boolean
+  showColorWheel: boolean
   aiPanelMinimized: boolean
 
   // Panel positions
@@ -29,6 +30,7 @@ interface UIState {
   // Actions
   setColorPaletteCollapsed: (collapsed: boolean) => void
   setColorPaletteShowAll: (showAll: boolean) => void
+  setShowColorWheel: (show: boolean) => void
   setAIPanelMinimized: (minimized: boolean) => void
   setColorPalettePosition: (position: SnapPosition) => void
   setAIPanelPosition: (position: SnapPosition) => void
@@ -43,6 +45,7 @@ export const useUIState = create<UIState>()(
       // Default states
       colorPaletteCollapsed: false,
       colorPaletteShowAll: false,
+      showColorWheel: false,
       aiPanelMinimized: false,
       colorPalettePosition: 'bottom-left',
       aiPanelPosition: 'bottom-left',
@@ -53,6 +56,7 @@ export const useUIState = create<UIState>()(
       // Actions
       setColorPaletteCollapsed: (collapsed) => set({ colorPaletteCollapsed: collapsed }),
       setColorPaletteShowAll: (showAll) => set({ colorPaletteShowAll: showAll }),
+      setShowColorWheel: (show) => set({ showColorWheel: show }),
       setAIPanelMinimized: (minimized) => set({ aiPanelMinimized: minimized }),
       setColorPalettePosition: (position) => set({ colorPalettePosition: position }),
       setAIPanelPosition: (position) => set({ aiPanelPosition: position }),
