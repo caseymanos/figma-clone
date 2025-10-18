@@ -146,13 +146,6 @@ export function useKeyboardShortcuts({
             e.preventDefault()
             clearSelection()
             break
-          case 'delete':
-          case 'backspace':
-            if (selectedIds.length > 0) {
-              e.preventDefault()
-              onDeleteSelected()
-            }
-            break
           case '+':
           case '=':
             e.preventDefault()
@@ -163,6 +156,12 @@ export function useKeyboardShortcuts({
             e.preventDefault()
             onZoomOut()
             break
+        }
+
+        // Delete/Backspace handling (separate check, not lowercased)
+        if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length > 0) {
+          e.preventDefault()
+          onDeleteSelected()
         }
 
         // Arrow key nudging

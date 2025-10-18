@@ -946,9 +946,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       finalHeight = size
     }
 
-    // Minimum size threshold
+    // Click-to-create: if mouse didn't move much, create default-sized shape
     if (finalWidth < 5 && finalHeight < 5) {
-      // If too small, create default sized shape
+      // Default sizes for click-to-create
       if (newShape.type === 'rect') {
         finalWidth = 120
         finalHeight = 80
@@ -962,13 +962,16 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         finalWidth = 300
         finalHeight = 200
       }
+
+      // Use click position as top-left corner for click-to-create
+      await createShapeAtPosition(newShape.type, newShape.startX, newShape.startY, finalWidth, finalHeight)
+    } else {
+      // Drag-to-create: use drawn dimensions
+      // Adjust position if drawn backwards
+      const x = width < 0 ? newShape.startX + width : newShape.startX
+      const y = height < 0 ? newShape.startY + height : newShape.startY
+      await createShapeAtPosition(newShape.type, x, y, finalWidth, finalHeight)
     }
-
-    // Adjust position if drawn backwards
-    const x = width < 0 ? newShape.startX + width : newShape.startX
-    const y = height < 0 ? newShape.startY + height : newShape.startY
-
-    await createShapeAtPosition(newShape.type, x, y, finalWidth, finalHeight)
 
     setIsDrawing(false)
     setNewShape(null)

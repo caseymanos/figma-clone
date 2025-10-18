@@ -25,12 +25,17 @@ export function BottomToolbar({ onZoomIn, onZoomOut }: BottomToolbarProps) {
 
   const positionStyle = getSnapPositionStyle(position)
 
+  // Determine if toolbar should be vertical based on position
+  const isVertical = position === 'left-center' || position === 'right-center'
+
   const toolbarStyle: CSSProperties = {
     ...positionStyle,
     position: 'fixed',
-    height: components.toolbar.height,
+    height: isVertical ? 'auto' : components.toolbar.height,
+    width: isVertical ? components.toolbar.height : 'auto',
     padding: components.toolbar.padding,
     display: 'flex',
+    flexDirection: isVertical ? 'column' : 'row',
     alignItems: 'center',
     gap: spacing[1],
     background: colors.chrome.toolbar,
@@ -58,12 +63,19 @@ export function BottomToolbar({ onZoomIn, onZoomOut }: BottomToolbarProps) {
     position: 'relative',
   }
 
-  const dividerStyle: CSSProperties = {
-    width: '1px',
-    height: '20px',
-    background: colors.gray[700],
-    margin: `0 ${spacing[1]}`,
-  }
+  const dividerStyle: CSSProperties = isVertical
+    ? {
+        width: '20px',
+        height: '1px',
+        background: colors.gray[700],
+        margin: `${spacing[1]} 0`,
+      }
+    : {
+        width: '1px',
+        height: '20px',
+        background: colors.gray[700],
+        margin: `0 ${spacing[1]}`,
+      }
 
   const labelStyle: CSSProperties = {
     position: 'absolute',

@@ -1,4 +1,6 @@
-import OpenAI from 'openai'
+import { openai } from '@ai-sdk/openai'
+import { streamText, tool } from 'ai'
+import { z } from 'zod'
 
 export const runtime = 'edge'
 export const maxDuration = 30 // 30 second timeout
