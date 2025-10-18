@@ -127,6 +127,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
 
   // Multi-select drag tracking
   const dragStartPositionsRef = useRef<Record<string, { x: number; y: number }>>({})
+  const dragStartPointerContentRef = useRef<{ x: number; y: number } | null>(null)
   const myUserIdRef = useRef<string | null>(null)
 
   // Cursor data store - ref-based, never triggers React renders
@@ -523,6 +524,21 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       }
     })
 
+    // Capture starting pointer position in CONTENT space for consistent deltas across zoom
+    const stage = stageRef.current
+    const p = stage?.getPointerPosition()
+    if (stage && p) {
+      dragStartPointerContentRef.current = stageToContent(
+        p.x,
+        p.y,
+        stage.x(),
+        stage.y(),
+        stage.scaleX()
+      )
+    } else {
+      dragStartPointerContentRef.current = null
+    }
+
     // Broadcast soft-locks for selected objects
     setEditingIds(selectedIds)
   }, [selectedIds])
@@ -535,12 +551,13 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     const id = shape.attrs.id
     if (!id || !selectedIds.includes(id) || selectedIds.length <= 1) return
 
-    // Calculate delta from the dragged shape
-    const startPos = dragStartPositionsRef.current[id]
-    if (!startPos) return
-
-    const dx = shape.x() - startPos.x
-    const dy = shape.y() - startPos.y
+    // Calculate delta based on pointer movement in CONTENT space for zoom-invariant dragging
+    const stage = stageRef.current
+    const p = stage?.getPointerPosition()
+    if (!stage || !p || !dragStartPointerContentRef.current) return
+    const currContent = stageToContent(p.x, p.y, stage.x(), stage.y(), stage.scaleX())
+    const dx = currContent.x - dragStartPointerContentRef.current.x
+    const dy = currContent.y - dragStartPointerContentRef.current.y
 
     // Move all other selected shapes by the same delta
     selectedIds.forEach(selectedId => {
