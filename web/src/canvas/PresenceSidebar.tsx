@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { usePresenceState } from './presenceState'
 import { UserAvatar } from '../components/UserAvatar'
+import { components } from '../styles/design-tokens'
 
 export function PresenceSidebar() {
   const users = usePresenceState((state) => state.users)
@@ -12,10 +13,10 @@ export function PresenceSidebar() {
 
   const sidebarStyle: CSSProperties = {
     position: 'fixed',
-    top: 49, // Below header
+    top: components.header.height, // Below header
     right: isCollapsed ? -280 : 0,
     width: 280,
-    height: 'calc(100vh - 49px)',
+    height: `calc(100vh - ${components.header.height})`,
     background: 'white',
     borderLeft: '1px solid #e5e7eb',
     boxShadow: isCollapsed ? 'none' : '-2px 0 8px rgba(0,0,0,0.05)',

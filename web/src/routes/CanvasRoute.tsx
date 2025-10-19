@@ -1,15 +1,15 @@
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { ensureCanvasMembership } from '../lib/canvasService'
 import { CanvasStage } from '../canvas/CanvasStage'
-import { PresenceSidebar } from '../canvas/PresenceSidebar'
+import { UsersPanel } from '../components/users/UsersPanel'
 import { ProfileSettings } from '../components/ProfileSettings'
 import { SessionSettings } from '../components/SessionSettings'
 import { AIPanel } from '../components/AIPanel'
 import { ColorPalette } from '../components/ColorPalette'
 import { Icon } from '../components/icons/Icon'
-import { colors, typography, spacing, borderRadius, components, transitions } from '../styles/design-tokens'
+import { colors, typography, spacing, borderRadius, components, transitions, zIndex } from '../styles/design-tokens'
 
 export default function CanvasRoute() {
   const navigate = useNavigate()
@@ -19,6 +19,8 @@ export default function CanvasRoute() {
   const [sessionName, setSessionName] = useState(() => localStorage.getItem('session_name') || '')
   const [sessionColor, setSessionColor] = useState(() => localStorage.getItem('session_color') || '#ef4444')
   const [membershipReady, setMembershipReady] = useState(false)
+  const [canvasSize, setCanvasSize] = useState({ width: window.innerWidth, height: window.innerHeight })
+  const canvasContainerRef = useRef<HTMLDivElement>(null)
   
   // Color palette state
   const [selectedColorName, setSelectedColorName] = useState<string>(() => {
@@ -108,10 +110,32 @@ export default function CanvasRoute() {
     // No force re-render - CanvasStage will handle updates internally
   }
 
+  // Measure canvas container size
+  useEffect(() => {
+    if (!canvasContainerRef.current) return
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect
+        setCanvasSize({ width, height })
+      }
+    })
+
+    resizeObserver.observe(canvasContainerRef.current)
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [])
+
   return (
     <Suspense fallback={null}>
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: colors.chrome.canvas }}>
         <header style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: zIndex.header,
+          width: '100%',
           height: components.header.height,
           padding: components.header.padding,
           display: 'flex',
@@ -244,9 +268,9 @@ export default function CanvasRoute() {
             </button>
           </div>
         </header>
-            <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-              {canvasId && membershipReady ? <CanvasStage canvasId={canvasId} selectedColor={selectedColorHex} /> : null}
-              {canvasId && membershipReady ? <PresenceSidebar /> : null}
+            <div ref={canvasContainerRef} style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+              {canvasId && membershipReady ? <CanvasStage canvasId={canvasId} selectedColor={selectedColorHex} width={canvasSize.width} height={canvasSize.height} /> : null}
+              {canvasId && membershipReady ? <UsersPanel /> : null}
               {canvasId && membershipReady && showAI ? (
                 <>
                   <AIPanel canvasId={canvasId} selectedColorName={selectedColorName} />

@@ -13,6 +13,8 @@ interface KeyboardShortcutsConfig {
   onZoomOut: () => void
   onNudge: (dx: number, dy: number) => void
   upsertObject: (obj: Partial<ObjectRecord> & { id: string }) => void
+  onResetView?: () => void
+  onCenterOrigin?: () => void
 }
 
 export function useKeyboardShortcuts({
@@ -24,6 +26,8 @@ export function useKeyboardShortcuts({
   onZoomOut,
   onNudge,
   upsertObject: _upsertObject,
+  onResetView,
+  onCenterOrigin,
 }: KeyboardShortcutsConfig) {
   const { activeTool, setActiveTool, clipboard, setClipboard } = useToolState()
   const { selectedIds, setSelectedIds, clear: clearSelection } = useSelection()
@@ -225,6 +229,14 @@ export function useKeyboardShortcuts({
           case '_':
             e.preventDefault()
             onZoomOut()
+            break
+          case '0':
+            e.preventDefault()
+            if (isShift && onCenterOrigin) {
+              onCenterOrigin()
+            } else if (onResetView) {
+              onResetView()
+            }
             break
         }
       }

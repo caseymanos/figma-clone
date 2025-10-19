@@ -27,6 +27,9 @@ interface UIState {
   strokeWidth: number
   opacity: number
 
+  // Grid options
+  snapToGrid: boolean
+
   // Actions
   setColorPaletteCollapsed: (collapsed: boolean) => void
   setColorPaletteShowAll: (showAll: boolean) => void
@@ -37,6 +40,7 @@ interface UIState {
   setToolbarPosition: (position: SnapPosition) => void
   setStrokeWidth: (width: number) => void
   setOpacity: (opacity: number) => void
+  setSnapToGrid: (snap: boolean) => void
 }
 
 export const useUIState = create<UIState>()(
@@ -52,6 +56,7 @@ export const useUIState = create<UIState>()(
       toolbarPosition: 'bottom-center',
       strokeWidth: 2,
       opacity: 100,
+      snapToGrid: false,
 
       // Actions
       setColorPaletteCollapsed: (collapsed) => set({ colorPaletteCollapsed: collapsed }),
@@ -63,6 +68,7 @@ export const useUIState = create<UIState>()(
       setToolbarPosition: (position) => set({ toolbarPosition: position }),
       setStrokeWidth: (width) => set({ strokeWidth: width }),
       setOpacity: (opacity) => set({ opacity: opacity }),
+      setSnapToGrid: (snap) => set({ snapToGrid: snap }),
     }),
     {
       name: 'figma-clone-ui-state',

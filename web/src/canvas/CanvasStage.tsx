@@ -13,6 +13,9 @@ import { stageToContent, contentToStage } from './cursorSmoothing'
 import { CursorPredictor } from './cursorPrediction'
 import Konva from 'konva'
 import { trackConflict } from '../lib/metrics'
+import { GridLayer } from './GridLayer'
+import { WORLD_WIDTH, WORLD_HEIGHT, MIN_ZOOM, MAX_ZOOM, snapToGrid as snapValue } from './constants'
+import { useUIState } from './uiState'
 
 function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
   let last = 0
@@ -84,12 +87,40 @@ function perpendicularDistance(
   return Math.sqrt(Math.pow(point.x - closestX, 2) + Math.pow(point.y - closestY, 2))
 }
 
-export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; selectedColor?: string }) {
+// Clamp camera to keep world bounds visible
+function clampCamera(
+  pos: { x: number; y: number },
+  scale: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  worldWidth: number,
+  worldHeight: number
+): { x: number; y: number } {
+  const minX = viewportWidth - worldWidth * scale
+  const minY = viewportHeight - worldHeight * scale
+  return {
+    x: Math.min(0, Math.max(minX, pos.x)),
+    y: Math.min(0, Math.max(minY, pos.y)),
+  }
+}
+
+interface CanvasStageProps {
+  canvasId: string
+  selectedColor?: string
+  width?: number
+  height?: number
+  onResetView?: () => void
+  onCenterOrigin?: () => void
+}
+
+export function CanvasStage({ canvasId, selectedColor, width, height }: CanvasStageProps) {
   const stageRef = useRef<any>(null)
   const objectLayerRef = useRef<any>(null)
   const cursorLayerRef = useRef<any>(null)
   const transformerRef = useRef<any>(null)
   const shapeRefsMap = useRef<Map<string, any>>(new Map())
+  
+  const snapToGrid = useUIState((s) => s.snapToGrid)
 
   const [scale, setScale] = useState(1)
   const setScaleIfChanged = (next: number) => {
@@ -156,10 +187,16 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         'postgres_changes',
         { event: '*', schema: 'public', table: 'objects', filter: `canvas_id=eq.${canvasId}` },
         (payload: any) => {
+          console.log('[Realtime] Received event:', payload.eventType, 'for object:', payload.new?.id?.slice(0, 8))
           if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
             const r = payload.new
+            console.log('[Realtime] updated_by:', r.updated_by?.slice(0, 8), 'myUserId:', myUserIdRef.current?.slice(0, 8))
             // Ignore own updates to prevent flicker
-            if (r.updated_by && myUserIdRef.current && r.updated_by === myUserIdRef.current) return
+            if (r.updated_by && myUserIdRef.current && r.updated_by === myUserIdRef.current) {
+              console.log('[Realtime] Ignoring own update')
+              return
+            }
+            console.log('[Realtime] Applying update from another user')
             pendingObjectsRef.current.push({
               id: r.id,
               type: r.type,
@@ -190,7 +227,9 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
           }
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        console.log('[Realtime] Subscription status:', status)
+      })
 
     supabase
       .from('objects')
@@ -467,6 +506,8 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   const onWheel = throttle((e: any) => {
     e.evt.preventDefault()
     const stage = stageRef.current
+    const vw = width || window.innerWidth
+    const vh = height || window.innerHeight
 
     // Check if Ctrl/Cmd key is held for zoom
     if (e.evt.ctrlKey || e.evt.metaKey) {
@@ -477,10 +518,14 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         x: (stage.getPointerPosition().x - stage.x()) / oldScale,
         y: (stage.getPointerPosition().y - stage.y()) / oldScale,
       }
-      const newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy
+      let newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy
+      // Clamp zoom
+      newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newScale))
       setScaleIfChanged(newScale)
       const pointer = stage.getPointerPosition()
-      const newPos = { x: pointer.x - mousePointTo.x * newScale, y: pointer.y - mousePointTo.y * newScale }
+      let newPos = { x: pointer.x - mousePointTo.x * newScale, y: pointer.y - mousePointTo.y * newScale }
+      // Clamp camera position
+      newPos = clampCamera(newPos, newScale, vw, vh, WORLD_WIDTH, WORLD_HEIGHT)
       stage.position(newPos)
       setStagePos(newPos)
     } else {
@@ -488,10 +533,12 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       const dx = e.evt.deltaX
       const dy = e.evt.deltaY
       const currentPos = stage.position()
-      const newPos = {
+      let newPos = {
         x: currentPos.x - dx,
         y: currentPos.y - dy
       }
+      // Clamp camera position
+      newPos = clampCamera(newPos, stage.scaleX(), vw, vh, WORLD_WIDTH, WORLD_HEIGHT)
       stage.position(newPos)
       setStagePos(newPos)
     }
@@ -500,7 +547,19 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   const onStageDragEnd = () => {
     const stage = stageRef.current
     if (stage) {
-      setStagePos({ x: stage.x(), y: stage.y() })
+      const vw = width || window.innerWidth
+      const vh = height || window.innerHeight
+      // Clamp camera position after drag
+      const clampedPos = clampCamera(
+        { x: stage.x(), y: stage.y() },
+        stage.scaleX(),
+        vw,
+        vh,
+        WORLD_WIDTH,
+        WORLD_HEIGHT
+      )
+      stage.position(clampedPos)
+      setStagePos(clampedPos)
     }
   }
 
@@ -556,8 +615,8 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     const p = stage?.getPointerPosition()
     if (!stage || !p || !dragStartPointerContentRef.current) return
     const currContent = stageToContent(p.x, p.y, stage.x(), stage.y(), stage.scaleX())
-    const dx = currContent.x - dragStartPointerContentRef.current.x
-    const dy = currContent.y - dragStartPointerContentRef.current.y
+    let dx = currContent.x - dragStartPointerContentRef.current.x
+    let dy = currContent.y - dragStartPointerContentRef.current.y
 
     // Move all other selected shapes by the same delta
     selectedIds.forEach(selectedId => {
@@ -565,15 +624,22 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         const node = shapeRefsMap.current.get(selectedId)
         const initialPos = dragStartPositionsRef.current[selectedId]
         if (node && initialPos) {
-          node.x(initialPos.x + dx)
-          node.y(initialPos.y + dy)
+          let newX = initialPos.x + dx
+          let newY = initialPos.y + dy
+          // Apply snap to grid if enabled
+          if (snapToGrid) {
+            newX = snapValue(newX)
+            newY = snapValue(newY)
+          }
+          node.x(newX)
+          node.y(newY)
         }
       }
     })
 
     // Redraw the layer
     objectLayerRef.current?.batchDraw()
-  }, [selectedIds])
+  }, [selectedIds, snapToGrid])
 
   // Event delegation for object dragging
   const onLayerDragEnd = useCallback(async (e: any) => {
@@ -590,18 +656,27 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       selectedIds.forEach(selectedId => {
         const node = shapeRefsMap.current.get(selectedId)
         if (node) {
-          const pos = { x: node.x(), y: node.y() }
+          let x = node.x()
+          let y = node.y()
+          
+          // Apply snap to grid if enabled
+          if (snapToGrid) {
+            x = snapValue(x)
+            y = snapValue(y)
+            node.x(x)
+            node.y(y)
+          }
 
           // Update local state
           upsertObject({
             id: selectedId,
-            x: pos.x,
-            y: pos.y,
+            x,
+            y,
             width: node.width(),
             height: node.height()
           })
 
-          updates.push({ id: selectedId, x: pos.x, y: pos.y })
+          updates.push({ id: selectedId, x, y })
         }
       })
 
@@ -624,13 +699,22 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       }
     } else {
       // Single shape drag
-      const finalPos = { x: shape.x(), y: shape.y() }
+      let x = shape.x()
+      let y = shape.y()
+      
+      // Apply snap to grid if enabled
+      if (snapToGrid) {
+        x = snapValue(x)
+        y = snapValue(y)
+        shape.x(x)
+        shape.y(y)
+      }
 
       // Update local state immediately
       upsertObject({
         id,
-        x: finalPos.x,
-        y: finalPos.y,
+        x,
+        y,
         width: shape.width(),
         height: shape.height()
       })
@@ -638,18 +722,18 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       // Optimistic single update
       const obj = (objectsRecord as any)[id]
       try {
-        await updateObjectOptimistic(id, obj?.version, { x: finalPos.x, y: finalPos.y } as any)
+        await updateObjectOptimistic(id, obj?.version, { x, y } as any)
       } catch (err: any) {
         if (err?.message === 'version_conflict' && err.latest) {
           // Merge by applying our delta from prev to latest if safe; fallback to LWW
-          const dx = finalPos.x - (obj?.x ?? finalPos.x)
-          const dy = finalPos.y - (obj?.y ?? finalPos.y)
+          const dx = x - (obj?.x ?? x)
+          const dy = y - (obj?.y ?? y)
           const merged = { x: (err.latest.x as number) + dx, y: (err.latest.y as number) + dy }
           await supabase.from('objects').update(merged).eq('id', id)
           trackConflict('merge_applied', { id })
         } else {
           // Fallback regular update
-          await supabase.from('objects').update({ x: finalPos.x, y: finalPos.y }).eq('id', id)
+          await supabase.from('objects').update({ x, y }).eq('id', id)
           trackConflict('merge_failed', { id })
         }
       }
@@ -659,7 +743,7 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     dragStartPositionsRef.current = {}
     // Release soft-locks
     setEditingIds([])
-  }, [upsertObject, selectedIds])
+  }, [upsertObject, selectedIds, snapToGrid])
 
   // Handle transform (resize/rotate) end
   const onTransformEnd = useCallback(async (e: any) => {
@@ -1072,37 +1156,76 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
   const handleZoomIn = useCallback(() => {
     const stage = stageRef.current
     if (!stage) return
+    const vw = width || window.innerWidth
+    const vh = height || window.innerHeight
     const oldScale = stage.scaleX()
-    const newScale = oldScale * 1.2
+    let newScale = oldScale * 1.2
+    // Clamp zoom
+    newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newScale))
     setScale(newScale)
-    const pointer = stage.getPointerPosition() || { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+    const pointer = stage.getPointerPosition() || { x: vw / 2, y: vh / 2 }
     const mousePointTo = {
       x: (pointer.x - stage.x()) / oldScale,
       y: (pointer.y - stage.y()) / oldScale,
     }
-    stage.position({
+    let newPos = {
       x: pointer.x - mousePointTo.x * newScale,
       y: pointer.y - mousePointTo.y * newScale,
-    })
-    setStagePos({ x: stage.x(), y: stage.y() })
-  }, [])
+    }
+    // Clamp camera position
+    newPos = clampCamera(newPos, newScale, vw, vh, WORLD_WIDTH, WORLD_HEIGHT)
+    stage.position(newPos)
+    setStagePos(newPos)
+  }, [width, height])
 
   const handleZoomOut = useCallback(() => {
     const stage = stageRef.current
     if (!stage) return
+    const vw = width || window.innerWidth
+    const vh = height || window.innerHeight
     const oldScale = stage.scaleX()
-    const newScale = oldScale / 1.2
+    let newScale = oldScale / 1.2
+    // Clamp zoom
+    newScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newScale))
     setScale(newScale)
-    const pointer = stage.getPointerPosition() || { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+    const pointer = stage.getPointerPosition() || { x: vw / 2, y: vh / 2 }
     const mousePointTo = {
       x: (pointer.x - stage.x()) / oldScale,
       y: (pointer.y - stage.y()) / oldScale,
     }
-    stage.position({
+    let newPos = {
       x: pointer.x - mousePointTo.x * newScale,
       y: pointer.y - mousePointTo.y * newScale,
-    })
-    setStagePos({ x: stage.x(), y: stage.y() })
+    }
+    // Clamp camera position
+    newPos = clampCamera(newPos, newScale, vw, vh, WORLD_WIDTH, WORLD_HEIGHT)
+    stage.position(newPos)
+    setStagePos(newPos)
+  }, [width, height])
+
+  const handleResetView = useCallback(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    const vw = width || window.innerWidth
+    const vh = height || window.innerHeight
+    // Reset to 1:1 scale, centered
+    const newScale = 1
+    setScale(newScale)
+    const newPos = {
+      x: vw / 2 - (WORLD_WIDTH * newScale) / 2,
+      y: vh / 2 - (WORLD_HEIGHT * newScale) / 2,
+    }
+    stage.position(newPos)
+    setStagePos(newPos)
+  }, [width, height])
+
+  const handleCenterOrigin = useCallback(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    // Center on 0,0 of the world
+    const newPos = { x: 0, y: 0 }
+    stage.position(newPos)
+    setStagePos(newPos)
   }, [])
 
   const handleNudge = useCallback(async (dx: number, dy: number) => {
@@ -1144,6 +1267,8 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     onZoomOut: handleZoomOut,
     onNudge: handleNudge,
     upsertObject,
+    onResetView: handleResetView,
+    onCenterOrigin: handleCenterOrigin,
   })
 
   // Update cursor style based on active tool
@@ -1171,12 +1296,15 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
     }
   })
 
+  const stageWidth = width || window.innerWidth
+  const stageHeight = height || window.innerHeight
+
   return (
     <div style={{ height: '100%', width: '100%', position: 'relative', cursor: getCursorStyle() }}>
       <Stage
         ref={stageRef}
-        width={window.innerWidth}
-        height={window.innerHeight}
+        width={stageWidth}
+        height={stageHeight}
         draggable={activeTool === 'pan'}
         scaleX={scale}
         scaleY={scale}
@@ -1186,6 +1314,17 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
         onMouseMove={onStageMouseMove}
         onMouseUp={onStageMouseUp}
       >
+        {/* Grid layer behind objects */}
+        <Layer listening={false}>
+          <GridLayer
+            stageX={stagePos.x}
+            stageY={stagePos.y}
+            scale={scale}
+            viewportWidth={stageWidth}
+            viewportHeight={stageHeight}
+          />
+        </Layer>
+
         <Layer ref={objectLayerRef} onDragStart={onLayerDragStart} onDragMove={onLayerDragMove} onDragEnd={onLayerDragEnd}>
           {objects.map((o) => {
             const isLocked = lockedIds.has(o.id)
@@ -1408,6 +1547,8 @@ export function CanvasStage({ canvasId, selectedColor }: { canvasId: string; sel
       <BottomToolbar
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
+        onResetView={handleResetView}
+        onCenterOrigin={handleCenterOrigin}
       />
     </div>
   )

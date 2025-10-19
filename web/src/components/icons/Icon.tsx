@@ -205,6 +205,27 @@ export function Icon({ name, size = 16, color = 'currentColor', style, className
         <path d="M13 2L13.5 3.5L15 4L13.5 4.5L13 6L12.5 4.5L11 4L12.5 3.5L13 2Z" stroke={color} strokeWidth="1.5" strokeLinejoin="round"/>
       </svg>
     ),
+
+    // View controls
+    refresh: (
+      <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M1.5 3.5C1.5 3.5 3 1 6.5 1C10.09 1 13 3.91 13 7.5C13 11.09 10.09 14 6.5 14C3.91 14 1.5 12.5 1.5 12.5M1.5 3.5V1M1.5 3.5H4" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    ),
+
+    target: (
+      <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="8" cy="8" r="6" stroke={color} strokeWidth="1.5"/>
+        <circle cx="8" cy="8" r="3" stroke={color} strokeWidth="1.5"/>
+        <circle cx="8" cy="8" r="1" fill={color}/>
+      </svg>
+    ),
+
+    grid: (
+      <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M2 6H14M2 10H14M6 2V14M10 2V14" stroke={color} strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    ),
   }
 
   const icon = icons[name]

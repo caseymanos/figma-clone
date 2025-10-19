@@ -11,12 +11,16 @@ import { getSnapPositionStyle, getSnapPreviewStyle } from '../canvas/snapPositio
 interface BottomToolbarProps {
   onZoomIn?: () => void
   onZoomOut?: () => void
+  onResetView?: () => void
+  onCenterOrigin?: () => void
 }
 
-export function BottomToolbar({ onZoomIn, onZoomOut }: BottomToolbarProps) {
+export function BottomToolbar({ onZoomIn, onZoomOut, onResetView, onCenterOrigin }: BottomToolbarProps) {
   const { activeTool, setActiveTool } = useToolState()
   const position = useUIState((s) => s.toolbarPosition)
   const setPosition = useUIState((s) => s.setToolbarPosition)
+  const snapToGrid = useUIState((s) => s.snapToGrid)
+  const setSnapToGrid = useUIState((s) => s.setSnapToGrid)
 
   const { isDragging, onMouseDown, dragStyle, previewPosition } = useDraggable({
     currentPosition: position,
@@ -169,6 +173,13 @@ export function BottomToolbar({ onZoomIn, onZoomOut }: BottomToolbarProps) {
         {/* View tools */}
         {createToolButton('zoomIn', 'Zoom In', () => onZoomIn?.(), '+')}
         {createToolButton('zoomOut', 'Zoom Out', () => onZoomOut?.(), '-')}
+        {onResetView && createToolButton('refresh', 'Reset View', () => onResetView(), '0')}
+        {onCenterOrigin && createToolButton('target', 'Center Origin', () => onCenterOrigin(), 'Shift+0')}
+
+        <div style={dividerStyle} />
+
+        {/* Grid tools */}
+        {createToolButton('grid', snapToGrid ? 'Snap to Grid (On)' : 'Snap to Grid (Off)', () => setSnapToGrid(!snapToGrid), 'Cmd+\\')}
       </div>
       {previewPosition && <div style={getSnapPreviewStyle(previewPosition)} />}
     </>
