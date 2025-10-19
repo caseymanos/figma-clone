@@ -174,7 +174,6 @@ export function CanvasStage({ canvasId, selectedColor, width, height }: CanvasSt
     // Resolve current auth user id for author-aware filtering
     supabase.auth.getUser().then(({ data }) => {
       myUserIdRef.current = data.user?.id || null
-      console.log('[Canvas] My user ID:', myUserIdRef.current)
     })
 
     const channel = supabase
@@ -188,15 +187,12 @@ export function CanvasStage({ canvasId, selectedColor, width, height }: CanvasSt
         'postgres_changes',
         { event: '*', schema: 'public', table: 'objects', filter: `canvas_id=eq.${canvasId}` },
         (payload: any) => {
-          console.log('[Realtime] Event:', payload.eventType, '| Object:', payload.new?.id?.slice(0,8), '| UpdatedBy:', payload.new?.updated_by?.slice(0,8), '| MyID:', myUserIdRef.current?.slice(0,8))
           if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
             const r = payload.new
             // Ignore own updates to prevent flicker
             if (r.updated_by && myUserIdRef.current && r.updated_by === myUserIdRef.current) {
-              console.log('[Realtime] Skipping own update')
               return
             }
-            console.log('[Realtime] Applying remote update at position:', r.x, r.y)
             pendingObjectsRef.current.push({
               id: r.id,
               type: r.type,

@@ -18,7 +18,8 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
   const addUser = usePresenceState((state) => state.addUser)
   const removeUser = usePresenceState((state) => state.removeUser)
   const updateUser = usePresenceState((state) => state.updateUser)
-  
+  const setCurrentUserId = usePresenceState((state) => state.setCurrentUserId)
+
   const myIdRef = useRef<string>('')
   const myNameRef = useRef<string>('User')
   const myColorRef = useRef<string>('#ef4444')
@@ -49,7 +50,8 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
   useEffect(() => {
     const uid = (window as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2)
     myIdRef.current = uid
-    
+    setCurrentUserId(uid)
+
     // Get session settings FIRST
     const { sessionName, sessionColor } = getSessionSettings()
     
@@ -184,7 +186,7 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
       supabase.removeChannel(channel)
       supabase.removeChannel(cursorChannel)
     }
-  }, [canvasId, addUser, removeUser, updateUser, onCursorUpdate])
+  }, [canvasId, addUser, removeUser, updateUser, setCurrentUserId, onCursorUpdate])
 
   // Listen for session settings updates
   useEffect(() => {

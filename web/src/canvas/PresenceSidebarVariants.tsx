@@ -411,28 +411,49 @@ export function ModernCardsPresence() {
 
 export function MinimalBarPresence() {
   const users = usePresenceState((state) => state.users)
+  const currentUserId = usePresenceState((state) => state.currentUserId)
   const [hoveredUser, setHoveredUser] = useState<{ user: PresenceUser; anchor: HTMLElement } | null>(null)
   const [isCollapsed, setIsCollapsed] = useState(false)
 
-  const userList = Object.values(users)
+  // Sort users: current user first, then others
+  const userList = Object.values(users).sort((a, b) => {
+    if (a.id === currentUserId) return -1
+    if (b.id === currentUserId) return 1
+    return 0
+  })
+
+  const MAX_VISIBLE_USERS = 6
+  const totalUsers = userList.length
+  const visibleUsers = userList.slice(0, MAX_VISIBLE_USERS)
+  const overflowCount = Math.max(0, totalUsers - MAX_VISIBLE_USERS)
+
+  // Calculate dynamic height based on user count
+  const itemHeight = 40 // avatar size
+  const itemGap = 8 // gap between avatars (spacing[2])
+  const padding = 12 // top and bottom padding (spacing[3])
+  const toggleButtonHeight = 36 + 16 // button + margin
+
+  const itemsToShow = Math.min(totalUsers, MAX_VISIBLE_USERS) + (overflowCount > 0 ? 1 : 0) // +1 for overflow badge
+  const contentHeight = itemsToShow * itemHeight + (itemsToShow - 1) * itemGap + padding * 2 + toggleButtonHeight
 
   const sidebarStyle: CSSProperties = {
     position: 'fixed',
     top: components.header.height,
     right: isCollapsed ? -72 : 0,
     width: 72,
-    height: `calc(100vh - ${components.header.height})`,
+    height: `${contentHeight}px`,
     background: 'white',
     borderLeft: `1px solid ${colors.border.base}`,
+    borderBottom: `1px solid ${colors.border.base}`,
+    borderBottomLeftRadius: borderRadius.md,
     boxShadow: isCollapsed ? 'none' : shadows.panel,
-    transition: 'right 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    transition: 'right 0.3s cubic-bezier(0.4, 0, 0.2, 1), height 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
     zIndex: 100,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     padding: `${spacing[3]} 0`,
-    gap: spacing[2],
-    overflow: 'auto'
+    gap: spacing[2]
   }
 
   const toggleButtonStyle: CSSProperties = {
@@ -461,9 +482,25 @@ export function MinimalBarPresence() {
     transition: transitions.transform
   }
 
+  const overflowBadgeStyle: CSSProperties = {
+    width: 40,
+    height: 40,
+    borderRadius: '50%',
+    background: colors.gray[100],
+    border: `2px solid ${colors.gray[300]}`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.text.secondary,
+    cursor: 'default',
+    flexShrink: 0
+  }
+
   if (userList.length === 0 && !isCollapsed) {
     return (
-      <div style={sidebarStyle}>
+      <div style={{...sidebarStyle, height: `${toggleButtonHeight + padding * 2 + 40}px`}}>
         <button
           style={toggleButtonStyle}
           onClick={() => setIsCollapsed(!isCollapsed)}
@@ -500,7 +537,7 @@ export function MinimalBarPresence() {
           {isCollapsed ? '👥' : '→'}
         </button>
 
-        {userList.map((user) => (
+        {visibleUsers.map((user) => (
           <div
             key={user.id}
             style={avatarWrapperStyle}
@@ -516,6 +553,12 @@ export function MinimalBarPresence() {
             <Avatar user={user} size={40} />
           </div>
         ))}
+
+        {overflowCount > 0 && (
+          <div style={overflowBadgeStyle}>
+            +{overflowCount}
+          </div>
+        )}
       </div>
       {hoveredUser && <Tooltip user={hoveredUser.user} anchor={hoveredUser.anchor} />}
     </>
