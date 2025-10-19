@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { ensureCanvasMembership } from '../lib/canvasService'
 import { CanvasStage } from '../canvas/CanvasStage'
-import { UsersPanel } from '../components/users/UsersPanel'
+import { PresenceSidebar } from '../canvas/PresenceSidebar'
 import { ProfileSettings } from '../components/ProfileSettings'
 import { SessionSettings } from '../components/SessionSettings'
 import { AIPanel } from '../components/AIPanel'
@@ -270,7 +270,7 @@ export default function CanvasRoute() {
         </header>
             <div ref={canvasContainerRef} style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
               {canvasId && membershipReady ? <CanvasStage canvasId={canvasId} selectedColor={selectedColorHex} width={canvasSize.width} height={canvasSize.height} /> : null}
-              {canvasId && membershipReady ? <UsersPanel /> : null}
+              {canvasId && membershipReady ? <PresenceSidebar /> : null}
               {canvasId && membershipReady && showAI ? (
                 <>
                   <AIPanel canvasId={canvasId} selectedColorName={selectedColorName} />

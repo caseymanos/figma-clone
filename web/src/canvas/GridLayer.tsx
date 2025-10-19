@@ -1,5 +1,6 @@
 import { Line } from 'react-konva'
 import { WORLD_WIDTH, WORLD_HEIGHT, GRID_STEP, GRID_MAJOR_STEP, GRID_LINE_COLOR, GRID_MAJOR_LINE_COLOR, GRID_LINE_WIDTH, GRID_MAJOR_LINE_WIDTH } from './constants'
+import type { ReactElement } from 'react'
 
 interface GridLayerProps {
   stageX: number
@@ -22,7 +23,7 @@ export function GridLayer({ stageX, stageY, scale, viewportWidth, viewportHeight
   const minY = Math.max(0, Math.floor(worldViewTop / GRID_STEP) * GRID_STEP)
   const maxY = Math.min(WORLD_HEIGHT, Math.ceil(worldViewBottom / GRID_STEP) * GRID_STEP)
 
-  const lines: JSX.Element[] = []
+  const lines: ReactElement[] = []
 
   // Vertical lines
   for (let x = minX; x <= maxX; x += GRID_STEP) {

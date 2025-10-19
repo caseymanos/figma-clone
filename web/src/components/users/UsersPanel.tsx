@@ -183,8 +183,9 @@ export function UsersPanel() {
                       displayName={user.displayName}
                       avatarUrl={user.avatarUrl}
                       status={user.status}
-                      color={user.color}
-                      size="sm"
+                      cursorColor={user.color}
+                      size="small"
+                      showStatus={true}
                     />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div
