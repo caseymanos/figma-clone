@@ -2,7 +2,7 @@ import { Suspense, useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { ensureCanvasMembership } from '../lib/canvasService'
-import { CanvasStage } from '../canvas/CanvasStage'
+import { CanvasStage, type CanvasStageApi } from '../canvas/CanvasStage'
 import { PresenceSidebar } from '../canvas/PresenceSidebar'
 import { ProfileSettings } from '../components/ProfileSettings'
 import { SessionSettings } from '../components/SessionSettings'
@@ -10,6 +10,7 @@ import { AIPanel } from '../components/AIPanel'
 import { ColorPalette } from '../components/ColorPalette'
 import { Icon } from '../components/icons/Icon'
 import { colors, typography, spacing, borderRadius, components, transitions, zIndex } from '../styles/design-tokens'
+import { useCanvasState } from '../canvas/state'
 
 export default function CanvasRoute() {
   const navigate = useNavigate()
@@ -21,6 +22,7 @@ export default function CanvasRoute() {
   const [membershipReady, setMembershipReady] = useState(false)
   const [canvasSize, setCanvasSize] = useState({ width: window.innerWidth, height: window.innerHeight })
   const canvasContainerRef = useRef<HTMLDivElement>(null)
+  const stageApiRef = useRef<CanvasStageApi>(null)
   
   // Color palette state
   const [selectedColorName, setSelectedColorName] = useState<string>(() => {
@@ -108,6 +110,36 @@ export default function CanvasRoute() {
     setSessionName(name)
     setSessionColor(color)
     // No force re-render - CanvasStage will handle updates internally
+  }
+
+  const handleResetView = () => {
+    stageApiRef.current?.resetView()
+  }
+
+  const handleCenterOrigin = () => {
+    stageApiRef.current?.centerOrigin()
+  }
+
+  const handleResetCanvas = async () => {
+    if (!canvasId) return
+    
+    const confirmed = window.confirm('Are you sure you want to reset the canvas? This will delete all objects and cannot be undone.')
+    if (!confirmed) return
+
+    // Delete all objects for this canvas
+    const { error } = await supabase
+      .from('objects')
+      .delete()
+      .eq('canvas_id', canvasId)
+
+    if (error) {
+      console.error('Failed to reset canvas:', error)
+      alert('Failed to reset canvas. Please try again.')
+      return
+    }
+
+    // Clear local state immediately
+    useCanvasState.setState({ objects: {} })
   }
 
   // Measure canvas container size
@@ -212,6 +244,78 @@ export default function CanvasRoute() {
               <Icon name={copied ? 'check' : 'link'} size={14} color="white" />
               {copied ? 'Copied' : 'Share'}
             </button>
+
+            <button
+              onClick={handleResetView}
+              onMouseEnter={(e) => e.currentTarget.style.background = colors.gray[700]}
+              onMouseLeave={(e) => e.currentTarget.style.background = colors.gray[800]}
+              title="Reset View (Cmd/Ctrl+0)"
+              style={{
+                height: '28px',
+                padding: '0 12px',
+                borderRadius: borderRadius.base,
+                border: 'none',
+                background: colors.gray[800],
+                color: colors.text.inverse,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: spacing[1],
+                fontSize: typography.fontSize.sm,
+                fontWeight: typography.fontWeight.medium,
+                transition: transitions.colors,
+              }}
+            >
+              Reset View
+            </button>
+
+            <button
+              onClick={handleCenterOrigin}
+              onMouseEnter={(e) => e.currentTarget.style.background = colors.gray[700]}
+              onMouseLeave={(e) => e.currentTarget.style.background = colors.gray[800]}
+              title="Go to Start (Shift+Cmd/Ctrl+0)"
+              style={{
+                height: '28px',
+                padding: '0 12px',
+                borderRadius: borderRadius.base,
+                border: 'none',
+                background: colors.gray[800],
+                color: colors.text.inverse,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: spacing[1],
+                fontSize: typography.fontSize.sm,
+                fontWeight: typography.fontWeight.medium,
+                transition: transitions.colors,
+              }}
+            >
+              Go to Start
+            </button>
+
+            <button
+              onClick={handleResetCanvas}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#dc2626'}
+              onMouseLeave={(e) => e.currentTarget.style.background = colors.gray[800]}
+              title="Reset Canvas (delete all objects)"
+              style={{
+                height: '28px',
+                padding: '0 12px',
+                borderRadius: borderRadius.base,
+                border: 'none',
+                background: colors.gray[800],
+                color: colors.text.inverse,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: spacing[1],
+                fontSize: typography.fontSize.sm,
+                fontWeight: typography.fontWeight.medium,
+                transition: transitions.colors,
+              }}
+            >
+              Reset Canvas
+            </button>
           </div>
 
           <div style={{ display: 'flex', gap: spacing[1], alignItems: 'center' }}>
@@ -269,7 +373,7 @@ export default function CanvasRoute() {
           </div>
         </header>
             <div ref={canvasContainerRef} style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
-              {canvasId && membershipReady ? <CanvasStage canvasId={canvasId} selectedColor={selectedColorHex} width={canvasSize.width} height={canvasSize.height} /> : null}
+              {canvasId && membershipReady ? <CanvasStage ref={stageApiRef} canvasId={canvasId} selectedColor={selectedColorHex} width={canvasSize.width} height={canvasSize.height} /> : null}
               {canvasId && membershipReady ? <PresenceSidebar /> : null}
               {canvasId && membershipReady && showAI ? (
                 <>

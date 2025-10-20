@@ -1,5 +1,5 @@
 import { Stage, Layer, Rect, Circle, Text, Transformer, Line } from 'react-konva'
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { updateObjectOptimistic, updateManyPositionsOptimistic } from './api'
 import { useCanvasState, useToolState } from './state'
@@ -113,7 +113,12 @@ interface CanvasStageProps {
   onCenterOrigin?: () => void
 }
 
-export function CanvasStage({ canvasId, selectedColor, width, height }: CanvasStageProps) {
+export type CanvasStageApi = {
+  resetView: () => void
+  centerOrigin: () => void
+}
+
+export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function CanvasStage({ canvasId, selectedColor, width, height }: CanvasStageProps, ref) {
   const stageRef = useRef<any>(null)
   const objectLayerRef = useRef<any>(null)
   const cursorLayerRef = useRef<any>(null)
@@ -251,9 +256,39 @@ export function CanvasStage({ canvasId, selectedColor, width, height }: CanvasSt
         upsertMany(batch)
       })
 
+    // Lightweight safety: after initial subscribe, re-fetch once in case an INSERT was missed by realtime during join
+    const safetyTimeout = setTimeout(() => {
+      supabase
+        .from('objects')
+        .select('id, x, y, width, height, rotation, fill, stroke, stroke_width, text_content, type, points, updated_by, updated_at, version')
+        .eq('canvas_id', canvasId)
+        .then(({ data }) => {
+          if (!data) return
+          const batch = data.map((r: any) => ({
+            id: r.id,
+            type: r.type,
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+            rotation: r.rotation,
+            fill: r.fill || '#4f46e5',
+            stroke: r.stroke,
+            stroke_width: r.stroke_width,
+            text_content: r.text_content,
+            points: r.points,
+            updatedBy: r.updated_by,
+            updatedAt: r.updated_at,
+            version: r.version,
+          }))
+          upsertMany(batch)
+        })
+    }, 1000)
+
     return () => {
       supabase.removeChannel(channel)
       if (objectsRafRef.current != null) cancelAnimationFrame(objectsRafRef.current)
+      clearTimeout(safetyTimeout)
     }
   }, [canvasId, upsertMany, removeObject])
 
@@ -367,9 +402,29 @@ export function CanvasStage({ canvasId, selectedColor, width, height }: CanvasSt
   }, [])
 
   // Get presence hook with trackCursor and myId
-  const { trackCursor, myId, setEditingIds } = usePresenceChannel({
+  const { trackCursor, myId, setEditingIds, broadcastObjectDrags } = usePresenceChannel({
     canvasId,
-    onCursorUpdate: handleCursorUpdate
+    onCursorUpdate: handleCursorUpdate,
+    onObjectDragUpdate: (updates) => {
+      console.log('[CanvasStage] Applying remote drag updates:', updates)
+      // Apply remote drag updates directly to nodes (no state writes)
+      let changed = false
+      updates.forEach(({ id, x, y }) => {
+        const node = shapeRefsMap.current.get(id)
+        if (node) {
+          console.log(`[CanvasStage] Moving node ${id} to (${x}, ${y})`)
+          node.x(x)
+          node.y(y)
+          changed = true
+        } else {
+          console.log(`[CanvasStage] Node ${id} not found in refs`)
+        }
+      })
+      if (changed) {
+        objectLayerRef.current?.batchDraw()
+        console.log('[CanvasStage] Redrawn object layer')
+      }
+    }
   })
 
   // Animation loop with predictor and coordinate transform
@@ -633,6 +688,14 @@ export function CanvasStage({ canvasId, selectedColor, width, height }: CanvasSt
 
     // Redraw the layer
     objectLayerRef.current?.batchDraw()
+
+    // Broadcast ephemeral drag updates for multi-select (including primary)
+    const updates: Array<{ id: string; x: number; y: number }> = []
+    selectedIds.forEach(selectedId => {
+      const node = shapeRefsMap.current.get(selectedId)
+      if (node) updates.push({ id: selectedId, x: node.x(), y: node.y() })
+    })
+    if (updates.length) broadcastObjectDrags(updates)
   }, [selectedIds, snapToGrid])
 
   // Event delegation for object dragging
@@ -1114,9 +1177,14 @@ export function CanvasStage({ canvasId, selectedColor, width, height }: CanvasSt
       return
     }
 
+    // Remove locally immediately for responsiveness
+    selectedIds.forEach((id) => {
+      removeObject(id)
+    })
+
     // Only clear selection if delete succeeded
     setSelectedIds([])
-  }, [selectedIds, setSelectedIds])
+  }, [selectedIds, setSelectedIds, removeObject])
 
   const handleDuplicateSelected = useCallback(async () => {
     if (selectedIds.length === 0) return
@@ -1221,6 +1289,11 @@ export function CanvasStage({ canvasId, selectedColor, width, height }: CanvasSt
     stage.position(newPos)
     setStagePos(newPos)
   }, [])
+
+  useImperativeHandle(ref, () => ({
+    resetView: handleResetView,
+    centerOrigin: handleCenterOrigin,
+  }), [handleResetView, handleCenterOrigin])
 
   const handleNudge = useCallback(async (dx: number, dy: number) => {
     if (selectedIds.length === 0) return
@@ -1330,6 +1403,16 @@ export function CanvasStage({ canvasId, selectedColor, width, height }: CanvasSt
               onDblClick: onShapeDoubleClick,
               rotation: o.rotation || 0,
               onTransformEnd: onTransformEnd,
+              onDragMove: (evt: any) => {
+                const node = evt.target
+                const id = node?.attrs?.id
+                if (!id) return
+                // Update local state to silence ReactKonva warning and keep controlled
+                upsertObject({ id, x: node.x(), y: node.y() })
+                // Broadcast single-object drag updates to peers
+                broadcastObjectDrags([{ id, x: node.x(), y: node.y() }])
+              },
+              onDragEnd: (evt: any) => onLayerDragEnd(evt),
               ref: (node: any) => {
                 if (node) {
                   shapeRefsMap.current.set(o.id, node)
@@ -1546,4 +1629,4 @@ export function CanvasStage({ canvasId, selectedColor, width, height }: CanvasSt
       />
     </div>
   )
-}
+})

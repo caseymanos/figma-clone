@@ -5,6 +5,7 @@ import { usePresenceState } from './presenceState'
 interface UsePresenceChannelOptions {
   canvasId: string
   onCursorUpdate?: (cursors: Record<string, { x: number; y: number; name: string; color: string; t?: number; seq?: number }>) => void
+  onObjectDragUpdate?: (updates: Array<{ id: string; x: number; y: number }>) => void
 }
 
 // Get session settings from localStorage
@@ -14,7 +15,7 @@ function getSessionSettings() {
   return { sessionName, sessionColor }
 }
 
-export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChannelOptions) {
+export function usePresenceChannel({ canvasId, onCursorUpdate, onObjectDragUpdate }: UsePresenceChannelOptions) {
   const addUser = usePresenceState((state) => state.addUser)
   const removeUser = usePresenceState((state) => state.removeUser)
   const updateUser = usePresenceState((state) => state.updateUser)
@@ -78,15 +79,10 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
     })
     
     channelRef.current = channel
+    cursorChannelRef.current = channel  // Use same channel for broadcasts
 
-    // Create dedicated broadcast channel for high-frequency cursor updates
-    const cursorChannel = supabase.channel(`cursor:canvas:${canvasId}`, {
-      config: {
-        broadcast: { self: false, ack: false }
-      }
-    })
-
-    cursorChannel
+    // Add broadcast listeners to main channel
+    channel
       .on('broadcast', { event: 'cursor' }, ({ payload: p }: any) => {
         // Supabase passes an envelope with { event, payload }
         if (!onCursorUpdate || !p || !p.id) return
@@ -95,8 +91,13 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
         const color = users[p.id]?.color || myColorRef.current
         onCursorUpdate({ [p.id]: { x: p.x, y: p.y, name, color, t: p.t, seq: p.seq } })
       })
-
-    cursorChannelRef.current = cursorChannel
+      .on('broadcast', { event: 'objects_drag' }, ({ payload }: any) => {
+        if (!onObjectDragUpdate) return
+        const updates = Array.isArray(payload?.updates) ? payload.updates : []
+        if (updates.length === 0) return
+        console.log('[Presence] Received object drag:', updates)
+        onObjectDragUpdate(updates as Array<{ id: string; x: number; y: number }>)
+      })
 
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState() as Record<string, Array<any>>
@@ -142,6 +143,7 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
 
     // Subscribe and fetch user info
     channel.subscribe(async (status: any) => {
+      console.log('[Presence] Channel subscription status:', status)
       if (status === 'SUBSCRIBED') {
         // Fetch user profile FIRST, before initial track
         const { data } = await supabase.auth.getUser()
@@ -179,12 +181,8 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
       }
     })
 
-    // Subscribe cursor broadcast channel
-    cursorChannel.subscribe()
-
     return () => {
       supabase.removeChannel(channel)
-      supabase.removeChannel(cursorChannel)
     }
   }, [canvasId, addUser, removeUser, updateUser, setCurrentUserId, onCursorUpdate])
 
@@ -252,8 +250,8 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
       }
 
       // Send cursor position via Broadcast (only after channel subscribed)
-      if ((cursorChannelRef.current as any)?.state?.value === 'joined' || (cursorChannelRef.current as any)?.state === 'joined') {
-        cursorChannelRef.current.send({
+      if (channelRef.current) {
+        channelRef.current.send({
           type: 'broadcast',
           event: 'cursor',
           payload: { id: myIdRef.current, x: roundedX, y: roundedY, t: now, seq }
@@ -263,6 +261,15 @@ export function usePresenceChannel({ canvasId, onCursorUpdate }: UsePresenceChan
       // Update tracking refs
       lastBroadcastPos.current = { x: roundedX, y: roundedY }
       lastBroadcastTime.current = now
+    },
+    broadcastObjectDrags: (updates: Array<{ id: string; x: number; y: number }>) => {
+      if (!channelRef.current) return
+      console.log('[Presence] Broadcasting object drag:', updates)
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'objects_drag',
+        payload: { updates }
+      })
     },
     setEditingIds: (ids: string[]) => {
       myEditingIdsRef.current = ids

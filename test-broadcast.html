@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Supabase Broadcast Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <h1>Supabase Broadcast Test</h1>
+  <p>Open this in two browser windows/tabs</p>
+  <button onclick="sendTest()">Send Test Broadcast</button>
+  <div id="log"></div>
+
+  <script>
+    // Replace with your actual Supabase URL and anon key
+    const SUPABASE_URL = 'https://banbwuyoyqendkmunatd.supabase.co'
+    const SUPABASE_ANON_KEY = prompt('Enter your SUPABASE_ANON_KEY:')
+    
+    const { createClient } = supabase
+    const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    
+    const log = (msg) => {
+      const div = document.getElementById('log')
+      div.innerHTML += `<p>${new Date().toLocaleTimeString()}: ${msg}</p>`
+      console.log(msg)
+    }
+
+    const channel = client.channel('test-broadcast', {
+      config: {
+        broadcast: { self: false, ack: false }
+      }
+    })
+
+    channel
+      .on('broadcast', { event: 'test' }, ({ payload }) => {
+        log(`✅ RECEIVED: ${JSON.stringify(payload)}`)
+      })
+      .subscribe((status) => {
+        log(`Channel status: ${status}`)
+      })
+
+    function sendTest() {
+      const payload = { message: 'Hello', time: Date.now() }
+      log(`📤 SENDING: ${JSON.stringify(payload)}`)
+      channel.send({
+        type: 'broadcast',
+        event: 'test',
+        payload
+      })
+    }
+
+    log('🎯 Test ready - click button to send broadcast')
+  </script>
+</body>
+</html>
+
