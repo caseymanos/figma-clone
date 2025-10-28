@@ -149,6 +149,7 @@ export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function
   const [isDrawing, setIsDrawing] = useState(false)
   const [newShape, setNewShape] = useState<{ startX: number; startY: number; type: 'rect' | 'circle' | 'text' | 'frame' } | null>(null)
   const [previewShape, setPreviewShape] = useState<{ x: number; y: number; width: number; height: number; type: 'rect' | 'circle' | 'text' | 'frame' } | null>(null)
+  const [rotationAngle, setRotationAngle] = useState<number | null>(null)
 
   // Pen tool state
   const [penPoints, setPenPoints] = useState<Array<{ x: number; y: number }>>([])
@@ -802,6 +803,17 @@ export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function
     setEditingIds([])
   }, [upsertObject, selectedIds, snapToGrid])
 
+  // Handle transform (resize/rotate) during transformation
+  const onTransform = useCallback((e: any) => {
+    const node = e.target
+    if (!node) return
+    
+    // Show rotation angle while transforming
+    const rotation = node.rotation()
+    const normalizedRotation = Math.round(rotation % 360)
+    setRotationAngle(normalizedRotation)
+  }, [])
+
   // Handle transform (resize/rotate) end
   const onTransformEnd = useCallback(async (e: any) => {
     const node = e.target
@@ -847,6 +859,9 @@ export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function
       }).eq('id', id)
       trackConflict('merge_failed', { id })
     }
+
+    // Hide rotation angle indicator
+    setRotationAngle(null)
   }, [upsertObject])
 
   const createShapeAtPosition = async (type: 'rect' | 'circle' | 'text' | 'frame', x: number, y: number, width: number, height: number) => {
@@ -1402,6 +1417,7 @@ export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function
               onClick: onShapeClick,
               onDblClick: onShapeDoubleClick,
               rotation: o.rotation || 0,
+              onTransform: onTransform,
               onTransformEnd: onTransformEnd,
               onDragMove: (evt: any) => {
                 const node = evt.target
@@ -1583,6 +1599,20 @@ export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function
 
           <Transformer
             ref={transformerRef}
+            rotateEnabled={true}
+            enabledAnchors={['top-left', 'top-center', 'top-right', 'middle-right', 'middle-left', 'bottom-left', 'bottom-center', 'bottom-right']}
+            rotateAnchorOffset={30}
+            rotateAnchorCursor="grab"
+            anchorSize={8}
+            anchorCornerRadius={2}
+            anchorStroke="#3b82f6"
+            anchorFill="white"
+            anchorStrokeWidth={2}
+            borderStroke="#3b82f6"
+            borderStrokeWidth={2}
+            borderDash={[]}
+            rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]}
+            rotationSnapTolerance={5}
             boundBoxFunc={(oldBox, newBox) => {
               // Limit resize to minimum 5px
               if (newBox.width < 5 || newBox.height < 5) {
@@ -1599,6 +1629,27 @@ export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function
       <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '4px 8px', borderRadius: 4, fontSize: 12 }}>
         FPS: {fps}
       </div>
+
+      {/* Rotation angle indicator - shows while rotating */}
+      {rotationAngle !== null && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(0, 0, 0, 0.85)',
+          color: 'white',
+          padding: '12px 20px',
+          borderRadius: 8,
+          fontSize: 16,
+          fontWeight: 600,
+          pointerEvents: 'none',
+          zIndex: 1000,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+        }}>
+          {rotationAngle}°
+        </div>
+      )}
 
       {/* Text editor overlay */}
       {editingTextId && (() => {
