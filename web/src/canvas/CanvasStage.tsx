@@ -143,7 +143,6 @@ export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function
   const activeTool = useToolState((s) => s.activeTool)
   const setActiveTool = useToolState((s) => s.setActiveTool)
 
-  const [fps, setFps] = useState(0)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 })
   const [isDrawing, setIsDrawing] = useState(false)
@@ -406,23 +405,18 @@ export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function
     canvasId,
     onCursorUpdate: handleCursorUpdate,
     onObjectDragUpdate: (updates) => {
-      console.log('[CanvasStage] Applying remote drag updates:', updates)
       // Apply remote drag updates directly to nodes (no state writes)
       let changed = false
       updates.forEach(({ id, x, y }) => {
         const node = shapeRefsMap.current.get(id)
         if (node) {
-          console.log(`[CanvasStage] Moving node ${id} to (${x}, ${y})`)
           node.x(x)
           node.y(y)
           changed = true
-        } else {
-          console.log(`[CanvasStage] Node ${id} not found in refs`)
         }
       })
       if (changed) {
         objectLayerRef.current?.batchDraw()
-        console.log('[CanvasStage] Redrawn object layer')
       }
     }
   })
@@ -518,26 +512,6 @@ export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function
     }
   }, [trackCursor])
 
-  // FPS counter
-  useEffect(() => {
-    let mounted = true
-    let last = performance.now()
-    let frames = 0
-    const loop = () => {
-      if (!mounted) return
-      frames += 1
-      const now = performance.now()
-      if (now - last >= 500) {
-        const fpsNow = Math.round((frames * 1000) / (now - last))
-        setFps(fpsNow)
-        frames = 0
-        last = now
-      }
-      requestAnimationFrame(loop)
-    }
-    const id = requestAnimationFrame(loop)
-    return () => { mounted = false; cancelAnimationFrame(id) }
-  }, [])
 
   // Attach transformer to selected shapes
   useEffect(() => {
@@ -1596,9 +1570,6 @@ export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function
         {/* Cursor layer - managed entirely by refs, never re-renders */}
         <Layer ref={cursorLayerRef} listening={false} />
       </Stage>
-      <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '4px 8px', borderRadius: 4, fontSize: 12 }}>
-        FPS: {fps}
-      </div>
 
       {/* Text editor overlay */}
       {editingTextId && (() => {
@@ -1624,7 +1595,6 @@ export const CanvasStage = forwardRef<CanvasStageApi, CanvasStageProps>(function
       <BottomToolbar
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
-        onResetView={handleResetView}
         onCenterOrigin={handleCenterOrigin}
       />
     </div>

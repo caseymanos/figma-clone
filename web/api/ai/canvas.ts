@@ -225,6 +225,7 @@ const tools: any[] = [
 ]
 
 // Interpret color descriptions and return hex code
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function interpretColor(description: string): string {
   const normalized = description.toLowerCase().trim()
   
@@ -262,6 +263,7 @@ function findClosestColor(description: string): string {
 }
 
 // Interpret position descriptions and return x, y coordinates
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function interpretPosition(description: string): { x: number; y: number } {
   const normalized = description.toLowerCase()
   
@@ -422,6 +424,7 @@ For complex requests like "login form", use the specialized pattern tools.`
           }
 
           // Send complete tool calls after stream ends
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           for (const [_, toolCall] of toolCallsAccumulator) {
             if (toolCall.name && toolCall.arguments) {
               const event = {

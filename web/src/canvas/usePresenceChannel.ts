@@ -95,7 +95,6 @@ export function usePresenceChannel({ canvasId, onCursorUpdate, onObjectDragUpdat
         if (!onObjectDragUpdate) return
         const updates = Array.isArray(payload?.updates) ? payload.updates : []
         if (updates.length === 0) return
-        console.log('[Presence] Received object drag:', updates)
         onObjectDragUpdate(updates as Array<{ id: string; x: number; y: number }>)
       })
 
@@ -143,7 +142,6 @@ export function usePresenceChannel({ canvasId, onCursorUpdate, onObjectDragUpdat
 
     // Subscribe and fetch user info
     channel.subscribe(async (status: any) => {
-      console.log('[Presence] Channel subscription status:', status)
       if (status === 'SUBSCRIBED') {
         // Fetch user profile FIRST, before initial track
         const { data } = await supabase.auth.getUser()
@@ -264,7 +262,6 @@ export function usePresenceChannel({ canvasId, onCursorUpdate, onObjectDragUpdat
     },
     broadcastObjectDrags: (updates: Array<{ id: string; x: number; y: number }>) => {
       if (!channelRef.current) return
-      console.log('[Presence] Broadcasting object drag:', updates)
       channelRef.current.send({
         type: 'broadcast',
         event: 'objects_drag',

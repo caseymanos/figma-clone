@@ -6,6 +6,9 @@ interface UseDraggableOptions {
   currentPosition: SnapPosition
   onPositionChange: (position: SnapPosition) => void
   disabled?: boolean
+  panelId?: string
+  occupiedPositions?: Map<string, SnapPosition>
+  onSwapPositions?: (panelId1: string, panelId2: string) => void
 }
 
 interface UseDraggableReturn {
@@ -19,6 +22,9 @@ export function useDraggable({
   currentPosition,
   onPositionChange,
   disabled = false,
+  panelId,
+  occupiedPositions,
+  onSwapPositions,
 }: UseDraggableOptions): UseDraggableReturn {
   const [isDragging, setIsDragging] = useState(false)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
@@ -82,8 +88,25 @@ export function useDraggable({
         window.innerHeight
       )
 
-      // Only update if position changed
-      if (finalPosition !== currentPosition) {
+      // Check for collision with other panels
+      if (panelId && occupiedPositions && onSwapPositions) {
+        // Find if another panel is at this position
+        let collidingPanelId: string | null = null
+        occupiedPositions.forEach((pos, id) => {
+          if (id !== panelId && pos === finalPosition) {
+            collidingPanelId = id
+          }
+        })
+
+        if (collidingPanelId) {
+          // Swap positions with the colliding panel
+          onSwapPositions(panelId, collidingPanelId)
+        } else if (finalPosition !== currentPosition) {
+          // No collision, just move to new position
+          onPositionChange(finalPosition)
+        }
+      } else if (finalPosition !== currentPosition) {
+        // Fallback: just update position if no collision detection enabled
         onPositionChange(finalPosition)
       }
 

@@ -16,10 +16,15 @@ export function AIPanel({ canvasId, selectedColorName }: { canvasId: string; sel
   const position = useUIState((s) => s.aiPanelPosition)
   const setMinimized = useUIState((s) => s.setAIPanelMinimized)
   const setPosition = useUIState((s) => s.setAIPanelPosition)
+  const getAllPanelPositions = useUIState((s) => s.getAllPanelPositions)
+  const swapPanelPositions = useUIState((s) => s.swapPanelPositions)
 
   const { isDragging, onMouseDown, dragStyle, previewPosition } = useDraggable({
     currentPosition: position,
     onPositionChange: setPosition,
+    panelId: 'aiPanel',
+    occupiedPositions: getAllPanelPositions(),
+    onSwapPositions: swapPanelPositions,
   })
 
   const onSubmit = async (e: any) => {

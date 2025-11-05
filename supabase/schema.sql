@@ -206,3 +206,52 @@ begin
 end;
 $$;
 
+-- =========================================================
+-- Share codes for easy canvas joining
+-- =========================================================
+
+create table if not exists public.canvas_share_codes (
+  canvas_id uuid primary key references public.canvases(id) on delete cascade,
+  share_code integer unique not null check (share_code >= 10000000 and share_code <= 99999999),
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_canvas_share_codes_code on public.canvas_share_codes(share_code);
+
+alter table public.canvas_share_codes enable row level security;
+
+create policy canvas_share_codes_select on public.canvas_share_codes for select using (true);
+create policy canvas_share_codes_insert on public.canvas_share_codes for insert with check (
+  exists (
+    select 1 from public.canvas_members m
+    where m.canvas_id = canvas_share_codes.canvas_id and m.user_id = auth.uid()
+  )
+);
+
+-- Function to generate a unique 8-digit share code
+create or replace function public.generate_share_code()
+returns integer
+language plpgsql
+as $$
+declare
+  new_code integer;
+  max_attempts integer := 100;
+  attempt integer := 0;
+begin
+  loop
+    -- Generate random 8-digit number (10000000 to 99999999)
+    new_code := 10000000 + floor(random() * 90000000)::integer;
+    
+    -- Check if code already exists
+    if not exists (select 1 from public.canvas_share_codes where share_code = new_code) then
+      return new_code;
+    end if;
+    
+    attempt := attempt + 1;
+    if attempt >= max_attempts then
+      raise exception 'Failed to generate unique share code after % attempts', max_attempts;
+    end if;
+  end loop;
+end;
+$$;
+

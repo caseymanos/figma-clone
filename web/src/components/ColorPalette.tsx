@@ -58,12 +58,17 @@ export function ColorPalette({ selectedColor, onColorSelect }: ColorPaletteProps
   const setStrokeWidth = useUIState((s) => s.setStrokeWidth)
   const setOpacity = useUIState((s) => s.setOpacity)
   const setPosition = useUIState((s) => s.setColorPalettePosition)
+  const getAllPanelPositions = useUIState((s) => s.getAllPanelPositions)
+  const swapPanelPositions = useUIState((s) => s.swapPanelPositions)
 
   const [customColor, setCustomColor] = useState(selectedColor)
 
   const { isDragging, onMouseDown, dragStyle, previewPosition } = useDraggable({
     currentPosition: position,
     onPositionChange: setPosition,
+    panelId: 'colorPalette',
+    occupiedPositions: getAllPanelPositions(),
+    onSwapPositions: swapPanelPositions,
   })
 
   const colorsToShow = showAll ? { ...CORE_COLORS, ...EXTENDED_COLORS } : CORE_COLORS
