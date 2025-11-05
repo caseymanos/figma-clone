@@ -1,7 +1,8 @@
 {
   "name": "@collabcanvas/web",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Real-time collaborative design canvas with AI-powered operations",
   "type": "module",
   "scripts": {
     "dev": "vite",

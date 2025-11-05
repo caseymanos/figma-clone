@@ -119,16 +119,13 @@ export const provider: Provider = {
             } else {
               json = JSON.parse(line)
             }
-            
-            console.log('Stream event:', json.type || json, json)
-            
+
             // Extract tool calls from the data stream
             // Data stream format sends tool-call events
             if (json.type === 'tool-call' || json.type === 'tool_call') {
-              console.log('Tool call found:', json.toolName, json.args)
               toolCalls.push(json)
             }
-          } catch (e) {
+          } catch {
             console.warn('Failed to parse stream line:', line.substring(0, 100))
           }
         }
@@ -239,7 +236,6 @@ export const provider: Provider = {
         throw new Error('AI did not generate any valid tool calls. Try rephrasing your request.')
       }
 
-      console.log('Parsed intents:', intents)
       return intents
     } catch (error: any) {
       console.error('Provider parse error:', error)

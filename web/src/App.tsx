@@ -1,32 +1,56 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import './App.css'
-import { createCanvasWithMembership } from './lib/canvasService'
+import { createCanvasWithMembership, getCanvasIdByShareCode } from './lib/canvasService'
 import { supabase } from './lib/supabaseClient'
 
 function App() {
   const navigate = useNavigate()
-  const [joinId, setJoinId] = useState('')
+  const [joinCode, setJoinCode] = useState('')
   const [loading, setLoading] = useState(false)
+  const [joining, setJoining] = useState(false)
 
   const createCanvas = async () => {
     setLoading(true)
     try {
       const id = await createCanvasWithMembership('Untitled')
       navigate(`/c/${id}`)
-    } catch (error) {
+    } catch {
       alert('Failed to create canvas')
     } finally {
       setLoading(false)
     }
   }
 
-  const joinCanvas = () => {
-    if (!joinId.trim()) {
-      alert('Please enter a canvas ID')
+  const joinCanvas = async () => {
+    const trimmedCode = joinCode.trim()
+    if (!trimmedCode) {
+      alert('Please enter a share code')
       return
     }
-    navigate(`/c/${joinId.trim()}`)
+
+    // Validate 8-digit format
+    if (!/^\d{8}$/.test(trimmedCode)) {
+      alert('Share code must be exactly 8 digits')
+      return
+    }
+
+    setJoining(true)
+    try {
+      const code = parseInt(trimmedCode, 10)
+      const canvasId = await getCanvasIdByShareCode(code)
+      
+      if (!canvasId) {
+        alert('Invalid share code. Please check the code and try again.')
+        return
+      }
+
+      navigate(`/c/${canvasId}`)
+    } catch {
+      alert('Failed to join canvas')
+    } finally {
+      setJoining(false)
+    }
   }
 
   return (
@@ -70,42 +94,47 @@ function App() {
           borderRadius: 8,
           background: '#fafafa'
         }}>
-          <h2 style={{ fontSize: '20px', marginBottom: '12px' }}>Join Existing Canvas</h2>
-          <p style={{ color: '#666', marginBottom: '16px' }}>Enter a canvas ID to collaborate</p>
+          <h2 style={{ fontSize: '20px', marginBottom: '12px' }}>Join Canvas</h2>
+          <p style={{ color: '#666', marginBottom: '16px' }}>Enter an 8-digit share code</p>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               type="text"
-              placeholder="Paste canvas ID or URL"
-              value={joinId}
+              placeholder="12345678"
+              value={joinCode}
               onChange={(e) => {
-                // Extract ID from full URL if pasted
-                const val = e.target.value
-                const match = val.match(/\/c\/([a-f0-9-]+)/)
-                setJoinId(match ? match[1] : val)
+                // Only allow digits and limit to 8 characters
+                const value = e.target.value.replace(/\D/g, '').slice(0, 8)
+                setJoinCode(value)
               }}
+              maxLength={8}
               onKeyDown={(e) => e.key === 'Enter' && joinCanvas()}
               style={{ 
                 flex: 1,
                 padding: '12px 16px', 
                 borderRadius: 6, 
                 border: '1px solid #ddd',
-                fontSize: '14px',
-                fontFamily: 'monospace'
+                fontSize: '18px',
+                fontFamily: 'monospace',
+                letterSpacing: '0.15em',
+                textAlign: 'center'
               }}
             />
             <button 
               onClick={joinCanvas}
+              disabled={joining || joinCode.length !== 8}
               style={{ 
                 padding: '12px 24px', 
                 borderRadius: 6, 
-                border: '1px solid #ddd', 
-                background: 'white',
+                border: 'none', 
+                background: (joining || joinCode.length !== 8) ? '#9ca3af' : '#4f46e5',
+                color: 'white',
                 fontSize: '16px',
                 fontWeight: '600',
-                cursor: 'pointer'
+                cursor: (joining || joinCode.length !== 8) ? 'not-allowed' : 'pointer',
+                opacity: (joining || joinCode.length !== 8) ? 0.6 : 1
               }}
             >
-              Join →
+              {joining ? 'Joining...' : 'Join →'}
             </button>
           </div>
         </div>

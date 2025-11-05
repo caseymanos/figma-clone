@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
-import { ensureCanvasMembership } from '../lib/canvasService'
+import { ensureCanvasMembership, getShareCodeByCanvasId } from '../lib/canvasService'
 import { CanvasStage, type CanvasStageApi } from '../canvas/CanvasStage'
 import { PresenceSidebar } from '../canvas/PresenceSidebar'
 import { ProfileSettings } from '../components/ProfileSettings'
@@ -16,6 +16,7 @@ export default function CanvasRoute() {
   const navigate = useNavigate()
   const { canvasId } = useParams()
   const [copied, setCopied] = useState(false)
+  const [shareCode, setShareCode] = useState<number | null>(null)
   const [showProfileSettings, setShowProfileSettings] = useState(false)
   const [sessionName, setSessionName] = useState(() => localStorage.getItem('session_name') || '')
   const [sessionColor, setSessionColor] = useState(() => localStorage.getItem('session_color') || '#ef4444')
@@ -92,6 +93,17 @@ export default function CanvasRoute() {
     })
   }, [canvasId])
 
+  // Fetch share code
+  useEffect(() => {
+    if (!canvasId) return
+    
+    getShareCodeByCanvasId(canvasId).then(code => {
+      if (code) setShareCode(code)
+    }).catch(err => {
+      console.error('Failed to get share code:', err)
+    })
+  }, [canvasId])
+
   const handleColorSelect = (colorName: string, colorHex: string) => {
     setSelectedColorName(colorName)
     setSelectedColorHex(colorHex)
@@ -99,8 +111,10 @@ export default function CanvasRoute() {
   }
 
   const copyToClipboard = () => {
-    const url = window.location.href
-    navigator.clipboard.writeText(url).then(() => {
+    if (!shareCode) return
+    
+    const codeStr = shareCode.toString()
+    navigator.clipboard.writeText(codeStr).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
@@ -110,10 +124,6 @@ export default function CanvasRoute() {
     setSessionName(name)
     setSessionColor(color)
     // No force re-render - CanvasStage will handle updates internally
-  }
-
-  const handleResetView = () => {
-    stageApiRef.current?.resetView()
   }
 
   const handleCenterOrigin = () => {
@@ -221,8 +231,39 @@ export default function CanvasRoute() {
               {canvasId?.split('-')[0] || 'Untitled'}
             </div>
 
+            {shareCode && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: spacing[2],
+                padding: '0 12px',
+                height: '28px',
+                background: colors.gray[100],
+                borderRadius: borderRadius.base,
+                border: `1px solid ${colors.gray[300]}`,
+              }}>
+                <span style={{
+                  fontSize: typography.fontSize.xs,
+                  color: colors.text.secondary,
+                  fontWeight: typography.fontWeight.medium,
+                }}>
+                  Code:
+                </span>
+                <span style={{
+                  fontSize: typography.fontSize.sm,
+                  fontFamily: 'monospace',
+                  fontWeight: typography.fontWeight.semibold,
+                  letterSpacing: '0.1em',
+                  color: colors.text.primary,
+                }}>
+                  {shareCode}
+                </span>
+              </div>
+            )}
+            
             <button
               onClick={copyToClipboard}
+              disabled={!shareCode}
               onMouseEnter={(e) => e.currentTarget.style.background = copied ? colors.status.online : colors.primary[700]}
               onMouseLeave={(e) => e.currentTarget.style.background = copied ? colors.status.online : colors.primary[600]}
               style={{
@@ -232,41 +273,18 @@ export default function CanvasRoute() {
                 border: 'none',
                 background: copied ? colors.status.online : colors.primary[600],
                 color: 'white',
-                cursor: 'pointer',
+                cursor: shareCode ? 'pointer' : 'not-allowed',
                 display: 'flex',
                 alignItems: 'center',
                 gap: spacing[1],
                 fontSize: typography.fontSize.sm,
                 fontWeight: typography.fontWeight.medium,
                 transition: transitions.colors,
+                opacity: shareCode ? 1 : 0.5,
               }}
             >
               <Icon name={copied ? 'check' : 'link'} size={14} color="white" />
-              {copied ? 'Copied' : 'Share'}
-            </button>
-
-            <button
-              onClick={handleResetView}
-              onMouseEnter={(e) => e.currentTarget.style.background = colors.gray[700]}
-              onMouseLeave={(e) => e.currentTarget.style.background = colors.gray[800]}
-              title="Reset View (Cmd/Ctrl+0)"
-              style={{
-                height: '28px',
-                padding: '0 12px',
-                borderRadius: borderRadius.base,
-                border: 'none',
-                background: colors.gray[800],
-                color: colors.text.inverse,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: spacing[1],
-                fontSize: typography.fontSize.sm,
-                fontWeight: typography.fontWeight.medium,
-                transition: transitions.colors,
-              }}
-            >
-              Reset View
+              {copied ? 'Copied!' : 'Copy Code'}
             </button>
 
             <button

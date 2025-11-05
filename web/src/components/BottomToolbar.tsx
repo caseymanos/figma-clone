@@ -11,11 +11,10 @@ import { getSnapPositionStyle, getSnapPreviewStyle } from '../canvas/snapPositio
 interface BottomToolbarProps {
   onZoomIn?: () => void
   onZoomOut?: () => void
-  onResetView?: () => void
   onCenterOrigin?: () => void
 }
 
-export function BottomToolbar({ onZoomIn, onZoomOut, onResetView, onCenterOrigin }: BottomToolbarProps) {
+export function BottomToolbar({ onZoomIn, onZoomOut, onCenterOrigin }: BottomToolbarProps) {
   const { activeTool, setActiveTool } = useToolState()
   const position = useUIState((s) => s.toolbarPosition)
   const setPosition = useUIState((s) => s.setToolbarPosition)
@@ -173,7 +172,6 @@ export function BottomToolbar({ onZoomIn, onZoomOut, onResetView, onCenterOrigin
         {/* View tools */}
         {createToolButton('zoomIn', 'Zoom In', () => onZoomIn?.(), '+')}
         {createToolButton('zoomOut', 'Zoom Out', () => onZoomOut?.(), '-')}
-        {onResetView && createToolButton('refresh', 'Reset View', () => onResetView(), '0')}
         {onCenterOrigin && createToolButton('target', 'Center Origin', () => onCenterOrigin(), 'Shift+0')}
 
         <div style={dividerStyle} />
